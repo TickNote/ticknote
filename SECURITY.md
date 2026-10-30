@@ -15,10 +15,10 @@ TickNote（待办便签）是一个本地优先的 Windows 桌面应用：没有
 请通过 GitHub 的私密安全公告报告：
 
 ```
-https://github.com/your-github-name/ticknote/security/advisories/new
+https://github.com/TickNote/ticknote/security/advisories/new
 ```
 
-（把 `your-github-name` 换成实际仓库所有者；也可以在该仓库的 Security 标签页点击 “Report a vulnerability”。）
+（也可以在该仓库的 Security 标签页点击 “Report a vulnerability”。）
 
 报告中请尽量包含：
 

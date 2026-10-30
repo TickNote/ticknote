@@ -56,7 +56,7 @@
 
 ## 安装
 
-从 [Releases](https://github.com/your-github-name/ticknote/releases) 下载最新构建，两种方式：
+从 [Releases](https://github.com/TickNote/ticknote/releases) 下载最新构建，两种方式：
 
 1. **安装包** —— `TickNote-x.y.z-Setup.exe`（NSIS，按用户安装，无需管理员权限，创建桌面与开始菜单快捷方式）。
    安装包 **未签名**，Windows SmartScreen 会提示「未知发布者 / Windows 已保护你的电脑」，属正常现象：点「更多信息」→「仍要运行」即可。
@@ -85,7 +85,7 @@
 ## 开发
 
 ```powershell
-git clone https://github.com/your-github-name/ticknote.git
+git clone https://github.com/TickNote/ticknote.git
 cd ticknote
 npm install
 npm run dev
@@ -141,5 +141,3 @@ npm run dev
 MIT © TickNote Contributors，详见 [LICENSE](LICENSE)。
 
 English version: [README.md](README.md)
-
-> Replace your-github-name with your GitHub account before publishing.

@@ -9,7 +9,7 @@
 - npm（仓库提交了 `package-lock.json`，请用它安装）。
 
 ```powershell
-git clone https://github.com/your-github-name/ticknote.git
+git clone https://github.com/TickNote/ticknote.git
 cd ticknote
 npm install
 npm run dev

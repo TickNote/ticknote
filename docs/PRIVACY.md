@@ -74,7 +74,7 @@ TickNote 是本地优先的单机工具：**不收集任何遥测数据，不做
 
 ## 变更与联系
 
-本说明会随功能变化更新，历史变更记录见 [CHANGELOG.md](../CHANGELOG.md)。如有隐私相关疑问，请在仓库 Issues 中提出：`https://github.com/your-github-name/ticknote/issues`。
+本说明会随功能变化更新，历史变更记录见 [CHANGELOG.md](../CHANGELOG.md)。如有隐私相关疑问，请在仓库 Issues 中提出：`https://github.com/TickNote/ticknote/issues`。
 
 ---
 

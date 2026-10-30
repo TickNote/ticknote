@@ -43,4 +43,4 @@
 - 卸载**不会删除** `%APPDATA%\TickNote` 中的记录；如需彻底清除请手动删除该目录。
 - 删除为硬删除，没有回收站；MCP 写入不会实时推送到已打开的主窗。
 
-[0.1.0]: https://github.com/your-github-name/ticknote/releases/tag/v0.1.0
+[0.1.0]: https://github.com/TickNote/ticknote/releases/tag/v0.1.0

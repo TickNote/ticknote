@@ -4,13 +4,13 @@
   "description": "TickNote（待办便签）- 本地优先的速记与待办桌面应用，支持 MCP",
   "license": "MIT",
   "author": "TickNote Contributors",
-  "homepage": "https://github.com/your-github-name/ticknote",
+  "homepage": "https://github.com/TickNote/ticknote",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-github-name/ticknote.git"
+    "url": "https://github.com/TickNote/ticknote.git"
   },
   "bugs": {
-    "url": "https://github.com/your-github-name/ticknote/issues"
+    "url": "https://github.com/TickNote/ticknote/issues"
   },
   "private": true,
   "type": "commonjs",

@@ -56,7 +56,7 @@ See [docs/MCP.md](docs/MCP.md) for client configuration (Claude Desktop, Cursor)
 
 ## Install
 
-Download the latest build from the [Releases](https://github.com/your-github-name/ticknote/releases) page. Two options:
+Download the latest build from the [Releases](https://github.com/TickNote/ticknote/releases) page. Two options:
 
 1. **Installer** — `TickNote-x.y.z-Setup.exe` (NSIS, per-user install, no admin rights required, desktop + Start Menu shortcuts).
    The build is **not code-signed**, so Windows SmartScreen will show "Unknown publisher" / "Windows protected your PC". That is expected: choose _More info_ → _Run anyway_.
@@ -85,7 +85,7 @@ Uninstalling does **not** delete your records (`deleteAppDataOnUninstall: false`
 ## Development
 
 ```powershell
-git clone https://github.com/your-github-name/ticknote.git
+git clone https://github.com/TickNote/ticknote.git
 cd ticknote
 npm install
 npm run dev
@@ -139,5 +139,3 @@ Full details: [docs/PRIVACY.md](docs/PRIVACY.md).
 ## License
 
 MIT © TickNote Contributors. See [LICENSE](LICENSE).
-
-> Replace your-github-name with your GitHub account before publishing.
