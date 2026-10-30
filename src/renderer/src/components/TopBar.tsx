@@ -33,7 +33,6 @@ export function TopBar({ query, onQueryChange, theme, onChangeTheme, onOpenExpor
 
   return (
     <header className="topbar">
-      <div className="brand">待办便签</div>
       <div className="search">
         <input
           value={query}
