@@ -6,47 +6,26 @@ TickNote ships a built-in stdio MCP server so that any AI client supporting the 
 
 ## Copy this prompt to your AI
 
-> Works with Trae, WorkBuddy, DeepSeek Harness, Claude Code, Cursor, and any client that can edit its own config. Paste the whole block; the AI will locate the paths, edit the config, reload, and verify.
+> Works with Trae, WorkBuddy, DeepSeek Harness, Claude Code, Cursor, and any client that can edit its own config. Just paste this like a normal chat message.
 
 ```text
-Please connect TickNote's local MCP server (stdio) on this Windows machine and verify it works.
-
-1. Transport must be stdio, not HTTP/SSE. Use "ticknote" as the server name.
-2. Default installed paths:
-   command: C:\Users\<your-user>\AppData\Local\Programs\TickNote\TickNote.exe
-   args: ["C:\Users\<your-user>\AppData\Local\Programs\TickNote\resources\mcp\server.js"]
-   env: { "ELECTRON_RUN_AS_NODE": "1" }
-   If these files do not exist, search this machine for TickNote.exe (the portable build can be anywhere); server.js is always in resources\mcp\server.js next to it. Do not download or replace any binary.
-3. Edit the MCP config your client actually reads:
-   - Trae: project .trae/mcp.json, or global %APPDATA%\Trae\User\mcp.json
-   - WorkBuddy: ~/.workbuddy/mcp.json
-   - DeepSeek Harness: $DSH_HOME/profiles/dsh-cli/cordis.patch.yml
-   - Other clients: their mcpServers config
-   Do not modify TickNote's database or records.
-4. Save, then restart/reload the MCP process and list the tools. Expect at least 5: create_item, list_items, search_items, update_item, complete_item. If "MCP delete tool" is enabled in TickNote settings, delete_item is also present (6 total).
-5. Create a test note "MCP connection test", then call search_items to confirm it was written.
-6. Tell me which file you changed, whether I need to restart the client manually, the tool count, and the test result.
+Help me hook up TickNote's MCP so you can read and write my notes and todos.
+TickNote is installed somewhere on this Windows machine, but I don't remember where — please find it (it may be in the local Programs folder, or a portable build unzipped anywhere).
+Then set it up in this client under the name "ticknote". Local stdio only; don't download or replace any files.
+When it works, create a note called "MCP connection test" to confirm writes, and tell me which file you changed and whether I need to restart the client.
 ```
 
-### Find the two paths yourself
+### If the AI cannot find it
+
+Run this and paste the output to the AI:
 
 ```powershell
-$exe = @(
-  "$env:LOCALAPPDATA\Programs\TickNote\TickNote.exe",
-  "$env:ProgramFiles\TickNote\TickNote.exe"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-if (-not $exe) {
-  $exe = (Get-ChildItem "$env:LOCALAPPDATA\Programs", "$env:USERPROFILE\Downloads" `
-    -Recurse -Filter TickNote.exe -ErrorAction SilentlyContinue |
-    Select-Object -First 1).FullName
-}
-
-$server = Join-Path (Split-Path $exe) 'resources\mcp\server.js'
-$exe
-$server
-Test-Path $server
+Get-ChildItem "$env:LOCALAPPDATA\Programs", "$env:USERPROFILE\Downloads", "$env:ProgramFiles" `
+  -Recurse -Filter TickNote.exe -ErrorAction SilentlyContinue |
+  Select-Object -First 5 -ExpandProperty FullName
 ```
+
+`server.js` is always next to it in `resources\mcp\server.js`.
 
 ## Purpose
 

@@ -6,51 +6,26 @@ TickNote 内置一个 stdio MCP server，让任何支持 Model Context Protocol 
 
 ## 懒人版：把这段话直接发给 AI
 
-> 适用于 Trae、WorkBuddy、DeepSeek Harness、Claude Code、Cursor 等能修改本地配置的客户端。复制下面整段发给 AI，它会自己找路径、写配置、重载并验证，不用你手填 JSON。
+> 适用于 Trae、WorkBuddy、DeepSeek Harness、Claude Code、Cursor 等能修改本地配置的客户端。像平常聊天一样复制下面这段，AI 会自己找安装位置、配好并验证。
 
 ```text
-请帮我在这台 Windows 电脑上接入 TickNote 的本地 MCP 服务（stdio），并完成验证。
-
-1. 传输方式必须是 stdio，不要用 HTTP / SSE；服务名用 ticknote。
-2. 安装版默认路径：
-   command: C:\Users\<你的用户名>\AppData\Local\Programs\TickNote\TickNote.exe
-   args: ["C:\Users\<你的用户名>\AppData\Local\Programs\TickNote\resources\mcp\server.js"]
-   env: { "ELECTRON_RUN_AS_NODE": "1" }
-   如果这两个文件不存在，请先在本机搜索 TickNote.exe（便携版可能解压在任何目录），server.js 一定在同目录的 resources\mcp\server.js；不要从网上下载或替换文件。
-3. 请修改你当前客户端实际读取的 MCP 配置：
-   - Trae：项目 .trae/mcp.json，或全局 %APPDATA%\Trae\User\mcp.json
-   - WorkBuddy：~/.workbuddy/mcp.json
-   - DeepSeek Harness：$DSH_HOME/profiles/dsh-cli/cordis.patch.yml
-   - 其他客户端：对应的 mcpServers 配置
-   不要修改 TickNote 的数据库或记录。
-4. 保存后请重启或重载 MCP 进程，然后列出工具。预期至少 5 个：create_item、list_items、search_items、update_item、complete_item；如果 TickNote 设置里开启了「MCP 删除工具」，还会多一个 delete_item（共 6 个）。
-5. 请创建一个测试便签「MCP 接入测试」，再用 search_items 搜索确认写入成功。
-6. 最后告诉我：改了哪个文件、是否需要我手动重启客户端、工具数量和测试结果。
+帮我把 TickNote 的 MCP 接上，这样你就能直接读写我的便签和待办。
+程序装在这台 Windows 电脑上，具体位置我记不清了，你自己找一下（可能装在本地程序目录，也可能是便携版解压在某个文件夹）。
+找到后在当前客户端里配好，服务名用 ticknote；只走本地 stdio，不要联网下载或替换任何文件。
+弄好以后建一条「MCP 接入测试」的便签，确认能写进去，再告诉我改了哪个文件、要不要重启客户端。
 ```
 
-### 先确认两个路径
+### AI 找不到路径时
 
-如果你不想让 AI 自己找，先在 PowerShell 里跑一遍：
+把它问到的路径告诉 AI，或者先在 PowerShell 里跑一遍，把输出贴给它：
 
 ```powershell
-$exe = @(
-  "$env:LOCALAPPDATA\Programs\TickNote\TickNote.exe",
-  "$env:ProgramFiles\TickNote\TickNote.exe"
-) | Where-Object { Test-Path $_ } | Select-Object -First 1
-
-if (-not $exe) {
-  $exe = (Get-ChildItem "$env:LOCALAPPDATA\Programs", "$env:USERPROFILE\Downloads" `
-    -Recurse -Filter TickNote.exe -ErrorAction SilentlyContinue |
-    Select-Object -First 1).FullName
-}
-
-$server = Join-Path (Split-Path $exe) 'resources\mcp\server.js'
-$exe
-$server
-Test-Path $server
+Get-ChildItem "$env:LOCALAPPDATA\Programs", "$env:USERPROFILE\Downloads", "$env:ProgramFiles" `
+  -Recurse -Filter TickNote.exe -ErrorAction SilentlyContinue |
+  Select-Object -First 5 -ExpandProperty FullName
 ```
 
-把输出的两个路径填到客户端配置即可。
+`server.js` 一定在同目录的 `resources\mcp\server.js`。
 
 ## 用途
 
