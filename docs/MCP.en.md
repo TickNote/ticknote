@@ -2,7 +2,51 @@
 
 # MCP integration
 
-TickNote ships a built-in stdio MCP server so that any AI client supporting the Model Context Protocol (Claude Desktop, Cursor, Trae, etc.) can read and write the same local records.
+TickNote ships a built-in stdio MCP server so that any AI client supporting the Model Context Protocol (Claude Desktop, Cursor, Trae, WorkBuddy, DeepSeek Harness, etc.) can read and write the same local records.
+
+## Copy this prompt to your AI
+
+> Works with Trae, WorkBuddy, DeepSeek Harness, Claude Code, Cursor, and any client that can edit its own config. Paste the whole block; the AI will locate the paths, edit the config, reload, and verify.
+
+```text
+Please connect TickNote's local MCP server (stdio) on this Windows machine and verify it works.
+
+1. Transport must be stdio, not HTTP/SSE. Use "ticknote" as the server name.
+2. Default installed paths:
+   command: C:\Users\<your-user>\AppData\Local\Programs\TickNote\TickNote.exe
+   args: ["C:\Users\<your-user>\AppData\Local\Programs\TickNote\resources\mcp\server.js"]
+   env: { "ELECTRON_RUN_AS_NODE": "1" }
+   If these files do not exist, search this machine for TickNote.exe (the portable build can be anywhere); server.js is always in resources\mcp\server.js next to it. Do not download or replace any binary.
+3. Edit the MCP config your client actually reads:
+   - Trae: project .trae/mcp.json, or global %APPDATA%\Trae\User\mcp.json
+   - WorkBuddy: ~/.workbuddy/mcp.json
+   - DeepSeek Harness: $DSH_HOME/profiles/dsh-cli/cordis.patch.yml
+   - Other clients: their mcpServers config
+   Do not modify TickNote's database or records.
+4. Save, then restart/reload the MCP process and list the tools. Expect at least 5: create_item, list_items, search_items, update_item, complete_item. If "MCP delete tool" is enabled in TickNote settings, delete_item is also present (6 total).
+5. Create a test note "MCP connection test", then call search_items to confirm it was written.
+6. Tell me which file you changed, whether I need to restart the client manually, the tool count, and the test result.
+```
+
+### Find the two paths yourself
+
+```powershell
+$exe = @(
+  "$env:LOCALAPPDATA\Programs\TickNote\TickNote.exe",
+  "$env:ProgramFiles\TickNote\TickNote.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $exe) {
+  $exe = (Get-ChildItem "$env:LOCALAPPDATA\Programs", "$env:USERPROFILE\Downloads" `
+    -Recurse -Filter TickNote.exe -ErrorAction SilentlyContinue |
+    Select-Object -First 1).FullName
+}
+
+$server = Join-Path (Split-Path $exe) 'resources\mcp\server.js'
+$exe
+$server
+Test-Path $server
+```
 
 ## Purpose
 
@@ -71,6 +115,88 @@ Global config file: `%USERPROFILE%\.cursor\mcp.json`; it can also live in the pr
 ```
 
 Replace the path placeholders with real values: `<用户名>` is your Windows account name; if you installed elsewhere, change `AppData\\Local\\Programs\\TickNote`. Backslashes in JSON must be written as `\\`.
+
+## Trae configuration
+
+Trae supports two locations; pick one:
+
+| Scope | File | When to use |
+| --- | --- | --- |
+| Project | `<project root>\.trae\mcp.json` | only this project |
+| Global | `%APPDATA%\Trae\User\mcp.json` | reused across projects (Settings → MCP → Open config file shows the real path) |
+
+```json
+{
+  "mcpServers": {
+    "ticknote": {
+      "command": "C:\\Users\\<用户名>\\AppData\\Local\\Programs\\TickNote\\TickNote.exe",
+      "args": ["C:\\Users\\<用户名>\\AppData\\Local\\Programs\\TickNote\\resources\\mcp\\server.js"],
+      "env": {
+        "ELECTRON_RUN_AS_NODE": "1"
+      }
+    }
+  }
+}
+```
+
+After saving, reload the window (`Developer: Reload Window`) or restart Trae; the MCP panel should show `ticknote` as connected.
+
+## WorkBuddy configuration
+
+WorkBuddy (Tencent) uses the standard `mcpServers` JSON:
+
+| Scope | File |
+| --- | --- |
+| User | `%USERPROFILE%\.workbuddy\mcp.json` |
+| Project | `<project>\.workbuddy\mcp.json` |
+
+Or use the UI: sidebar "Plugins" → "MCP Servers" → "Configure MCP", and paste:
+
+```json
+{
+  "mcpServers": {
+    "ticknote": {
+      "command": "C:\\Users\\<用户名>\\AppData\\Local\\Programs\\TickNote\\TickNote.exe",
+      "args": ["C:\\Users\\<用户名>\\AppData\\Local\\Programs\\TickNote\\resources\\mcp\\server.js"],
+      "env": {
+        "ELECTRON_RUN_AS_NODE": "1"
+      }
+    }
+  }
+}
+```
+
+Green status means connected; red means the path or JSON is invalid. Restart WorkBuddy or reload its MCP servers after editing.
+
+## DeepSeek Harness (dsh) configuration
+
+DeepSeek Harness stores MCP servers in the user profile patch:
+
+```
+%USERPROFILE%\.dsh\profiles\dsh-cli\cordis.patch.yml
+```
+
+When `DSH_HOME` is set, use `$DSH_HOME/profiles/dsh-cli/cordis.patch.yml` instead. Append:
+
+```yaml
+- insert:
+    - id: mcp-ticknote
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        transport: stdio
+        serverName: ticknote
+        command: 'C:\Users\<用户名>\AppData\Local\Programs\TickNote\TickNote.exe'
+        args:
+          - 'C:\Users\<用户名>\AppData\Local\Programs\TickNote\resources\mcp\server.js'
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
+```
+
+Single-quoted YAML keeps Windows backslashes literal. Restart dsh (or reload the profile) and run `/mcp` to inspect the server and its tools; they are exposed as `mcp__ticknote__<tool>`.
+
+## Other stdio clients
+
+Any client that understands `mcpServers` (Claude Code, Windsurf, Cline, Continue, etc.) can reuse the JSON above. The three things that matter: `command` → `TickNote.exe`, `args` → `resources\mcp\server.js`, and `env` → `ELECTRON_RUN_AS_NODE=1`.
 
 ## Tool list
 
