@@ -1,0 +1,52 @@
+name: 功能建议
+description: 提出新功能或对现有行为的改进建议
+title: '[Feature]: '
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢建议！TickNote 的定位是「零摩擦速记 + 简单待办」，请先说明使用场景，再描述期望的实现方式。
+
+        提交前请先搜索已有 Issue，避免重复。
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 需求场景
+      description: 你在什么情况下需要这个功能？现在是怎么绕过的？
+      placeholder: |
+        例如：我经常在会议中记录多条待办，结束后想一次性导出……
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 期望行为
+      description: 你希望 TickNote 具体怎么表现？交互、入口、快捷键都可以描述。
+      placeholder: |
+        例如：在抽屉里增加一个「复制为 Markdown」按钮，点击后……
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 替代方案
+      description: 你考虑过的其他做法，或现有功能能否部分满足
+    validations:
+      required: false
+
+  - type: dropdown
+    id: pr
+    attributes:
+      label: 是否愿意提交 PR
+      options:
+        - 愿意，我可以实现
+        - 愿意，但需要维护者指导
+        - 可以帮忙测试或补充文档
+        - 暂时不方便
+    validations:
+      required: true

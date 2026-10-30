@@ -1,0 +1,69 @@
+{
+  "name": "ticknote",
+  "version": "0.1.0",
+  "description": "TickNote（待办便签）- 本地优先的速记与待办桌面应用，支持 MCP",
+  "license": "MIT",
+  "author": "TickNote Contributors",
+  "homepage": "https://github.com/your-github-name/ticknote",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-github-name/ticknote.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-github-name/ticknote/issues"
+  },
+  "private": true,
+  "type": "commonjs",
+  "main": "out/main/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "electron",
+    "notes",
+    "todo",
+    "sqlite",
+    "mcp",
+    "windows",
+    "local-first"
+  ],
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:mcp": "esbuild src/mcp/server.ts --bundle --platform=node --format=cjs --target=node24 --outfile=resources/mcp/server.js",
+    "build:all": "npm run build && npm run build:mcp",
+    "start": "electron .",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src scripts tests",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run && npm run test:mcp",
+    "test:watch": "vitest",
+    "test:mcp": "tsx scripts/test-mcp.ts",
+    "dist": "npm run build:all && electron-builder --publish never",
+    "pack:portable": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/pack-portable.ps1"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "electron": "^45.1.0",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "esbuild": "^0.28.2",
+    "globals": "^17.13.0",
+    "oxlint": "^1.90.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5"
+  }
+}

@@ -1,0 +1,10 @@
+node_modules
+out
+release
+dist
+coverage
+.tmp
+resources/mcp/server.js
+package-lock.json
+DESIGN.md
+docs/DESIGN.md

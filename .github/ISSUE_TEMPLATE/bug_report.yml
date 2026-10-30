@@ -1,0 +1,84 @@
+name: Bug 报告
+description: 反馈 TickNote 使用中遇到的问题（请先搜索已有 Issue）
+title: '[Bug]: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先搜索已有 Issue，并尽量提供可复现步骤。
+
+        请注意：**不要粘贴 API Key、真实记录内容或完整的 `settings.json`**。
+
+  - type: input
+    id: version
+    attributes:
+      label: TickNote 版本
+      description: 安装包文件名或设置面板中的版本号
+      placeholder: '例如 0.1.0'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: 安装方式
+      options:
+        - Setup 安装包（TickNote-x.y.z-Setup.exe）
+        - 便携版 zip（TickNote-x.y.z-portable.zip）
+        - 开发模式（npm run dev / electron .）
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: 系统版本
+      description: 按 Win + R 运行 winver 可查看 Windows 版本
+      placeholder: '例如 Windows 11 24H2 x64（10.0.26100）'
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从启动开始，按顺序写清每一步
+      placeholder: |
+        1. 按 Ctrl+Shift+Space 唤起浮窗
+        2. 输入「明天交周报」并回车
+        3. 打开主窗点击该记录
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+      placeholder: 描述你期望发生的结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 截图
+      description: 开发模式可附终端输出；截图可直接拖入。请先清除敏感信息。
+      render: text
+      placeholder: |
+        可粘贴报错、终端日志，或说明截图内容
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: features
+    attributes:
+      label: 是否开启以下功能
+      description: 勾选与问题相关的项，便于定位
+      options:
+        - label: AI 润色（aiEnabled）
+        - label: MCP 删除工具（mcpDeleteEnabled）
+        - label: 开机自启
+        - label: 自定义数据目录或环境变量（TICKNOTE_DATA / TICKNOTE_DB）

@@ -1,0 +1,81 @@
+export type ItemKind = 'note' | 'todo';
+export type ItemStatus = 'open' | 'done';
+export type ItemSource = 'human' | 'ai';
+export type ListFilter = 'all' | 'todo' | 'note' | 'done';
+
+export interface Item {
+  id: string;
+  content: string;
+  kind: ItemKind;
+  status: ItemStatus;
+  remindAt: number | null;
+  remindedAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+  source: ItemSource;
+}
+
+export interface ListQuery {
+  filter: ListFilter;
+  cursor?: number;
+  limit?: number;
+}
+
+export interface CreateItemInput {
+  content: string;
+  kind: ItemKind;
+  source?: ItemSource;
+}
+
+export type ThemePreference = 'system' | 'light' | 'dark';
+export type ExportScope = 'all' | 'todo' | 'note' | 'done' | 'today';
+
+export interface ExportResult {
+  dir: string;
+  files: string[];
+  count: number;
+}
+
+export interface SettingsPatch {
+  theme?: ThemePreference;
+  hotkey?: string;
+  hideCaptureOnBlur?: boolean;
+  mcpDeleteEnabled?: boolean;
+  aiEnabled?: boolean;
+  aiBaseUrl?: string;
+  aiModel?: string;
+  aiApiKey?: string | null;
+}
+
+export interface AutostartStatus {
+  openAtLogin: boolean;
+  executableWillLaunchAtLogin: boolean;
+  blocked: boolean;
+  packaged: boolean;
+}
+
+export interface AiParseResult {
+  content: string;
+  kind: ItemKind;
+}
+
+export interface UninstallResult {
+  available: boolean;
+  opened: boolean;
+  reason: 'dev' | 'portable' | 'error' | 'opened';
+}
+
+export interface Settings {
+  hotkey: string;
+  closeToTrayHintShown: boolean;
+  theme: ThemePreference;
+  hideCaptureOnBlur: boolean;
+  mcpDeleteEnabled: boolean;
+  aiEnabled: boolean;
+  aiBaseUrl: string;
+  aiModel: string;
+  aiApiKeySet: boolean;
+  hotkeyRegistered: boolean;
+  autostartConfigured: boolean;
+}

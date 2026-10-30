@@ -1,0 +1,46 @@
+appId: com.ticknote.app
+productName: TickNote
+copyright: Copyright © 2026 TickNote
+
+directories:
+  output: release
+  buildResources: build
+
+# 本地已有 electron 运行时，直接复用，避免打包时再下载
+electronDist: node_modules/electron/dist
+
+files:
+  - out/**
+  - package.json
+  - "!node_modules/**"
+
+# MCP 入口不能压在 asar 里：放到安装目录 resources/mcp/server.js
+extraResources:
+  - from: resources/mcp
+    to: mcp
+
+# 只保留中文/英文语言包（可省约 47MB）
+electronLanguages:
+  - zh-CN
+  - en-US
+
+# NSIS 用最大压缩（7z/LZMA），构建略慢但安装包更小
+compression: maximum
+
+win:
+  icon: build/icon.png
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-${version}-Setup.${ext}
+
+nsis:
+  include: build/installer.nsh
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: TickNote
+  deleteAppDataOnUninstall: false

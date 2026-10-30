@@ -1,0 +1,12 @@
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.jpg binary
+*.zip binary
+*.exe binary
+*.db binary
+*.ttf binary
+
+package-lock.json merge=binary

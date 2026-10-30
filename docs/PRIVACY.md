@@ -1,0 +1,88 @@
+# 隐私说明
+
+> 适用于 TickNote（待办便签）0.1.0，Windows 桌面版及其内置 MCP server。
+
+## 一句话
+
+TickNote 是本地优先的单机工具：**不收集任何遥测数据，不做后台联网**。唯一的出站请求来自你主动开启并点击触发的「AI 润色」，它只发送当前这一行文本到你配置的接口。
+
+## 我们收集什么
+
+**什么也不收集。**
+
+- 没有账号体系，不需要登录。
+- 没有遥测、埋点、使用统计、崩溃上报。
+- 没有自动更新检查，不访问任何配置下发接口。
+- 不读取通讯录、不抓取剪贴板历史、不监听键盘（全局热键只注册一个组合键，不记录其他按键）。
+
+## 你的数据存在哪里
+
+所有内容都在本机 `%APPDATA%\TickNote`：
+
+| 内容          | 路径                                                   | 说明                                                      |
+| ------------- | ------------------------------------------------------ | --------------------------------------------------------- |
+| 记录数据库    | `%APPDATA%\TickNote\ticknote.db`（含 `-wal` / `-shm`） | 明文 SQLite；记录正文、类型、状态、提醒时间               |
+| 设置          | `%APPDATA%\TickNote\settings.json`                     | 热键、主题、开机自启状态、AI 端点与模型、加密后的 API Key |
+| Markdown 导出 | `%APPDATA%\TickNote\export\notes-YYYY-MM-DD.md`        | 你主动导出时生成，纯文本                                  |
+
+- 应用首次启动时会把旧版本的数据（`%APPDATA%\QuickNote\quicknote.db`，或同目录的旧文件名 `quicknote.db`）**复制**一次到新位置，不删除旧文件。
+- 数据库没有加密，其安全性取决于你的 Windows 账户与磁盘加密（建议开启 BitLocker）。任何能访问该文件的本地程序都能读取记录。
+
+## AI 润色
+
+默认关闭，只有你在设置里开启后，浮窗与主窗输入区才会出现「AI 润色」按钮，并且**只有点击按钮才会发起请求**。
+
+- **发送内容**：仅当前输入框里的这一行文本（上限 2000 字符）。不发送历史记录、不发送其他记录、不发送统计信息。
+- **发送目标**：你在设置里填写的接口地址（`aiBaseUrl`）与模型（`aiModel`），走 OpenAI 兼容的 `/chat/completions`。默认值是 `https://api.deepseek.com/v1` + `deepseek-chat`。
+- **不发送的内容**：API Key 只作为 `Authorization: Bearer` 头发往该端点，不会被写入日志或导出文件。
+- **请求参数**：`temperature: 0`，要求返回 JSON `{content, kind}`；3 秒超时。失败或超时保留原文。
+- **结果处理**：润色结果只回显到输入框，可撤销；你按 `Enter` / 点「记录」后才写库。
+
+**API Key 的存储方式**：
+
+- 用 Electron `safeStorage.encryptString()` 加密（Windows 上由 DPAPI 保护），再 base64 编码写入 `%APPDATA%\TickNote\settings.json` 的 `aiApiKeyEncrypted` 字段。
+- 渲染层只能看到 `aiApiKeySet: true/false`，拿不到明文；解密只在主进程进行。
+- 如果系统上 `safeStorage` 不可用（极少数环境），会降级为 `plain:<base64>` 并带明确前缀——这只是编码、**不是加密**。设置面板可随时清除 Key。
+- 注意：能读取 `settings.json` 的本机程序也可能通过同一套 DPAPI 解出 Key，请保护好你的 Windows 账户。
+
+**第三方服务**：AI 请求直接由你的电脑发往你选择的接口提供方，不经过 TickNote 作者或任何中转。该提供方如何处理请求内容，适用其自身隐私政策与所在地法律，请自行评估。
+
+## MCP
+
+- MCP server 是本地 **stdio 进程**，不监听端口、不联网，也没有云端中转。
+- 它直接读写 `%APPDATA%\TickNote\ticknote.db`，因此接入的 AI 客户端可以读取、创建、修改记录；开启「MCP 删除工具」后还可硬删除。
+- MCP 进程本身不发送数据到外部；但 AI 客户端拿到记录后如何使用、是否上传给模型服务商，取决于该客户端，不在 TickNote 的控制范围内。
+- 请不要把 TickNote 的 MCP 配置接到你不信任的客户端上。
+
+## 导出文件
+
+- 导出是**手动触发**的（主窗导出弹窗或托盘菜单），路径固定在 `%APPDATA%\TickNote\export\`。
+- 生成的是纯 Markdown 文本（`notes-YYYY-MM-DD.md`），不含 API Key、不含设置数据。
+- 导出后文件如何被复制、上传、分享，由你自行负责；导出目录同样没有加密。
+
+## 删除数据
+
+| 需求                   | 做法                                                                              |
+| ---------------------- | --------------------------------------------------------------------------------- |
+| 清空所有记录但保留设置 | 设置面板 →「危险操作」→「清空全部记录」（二次确认，硬删除，无回收站）             |
+| 彻底重置应用           | 退出 TickNote（托盘菜单「退出」），删除整个 `%APPDATA%\TickNote` 目录             |
+| 卸载应用               | 安装版用系统卸载程序（设置面板或开始菜单「卸载 TickNote」）；**卸载不会删除数据** |
+| 便携版                 | 直接删除解压目录；数据仍在 `%APPDATA%\TickNote`，需另行删除                       |
+
+- 导入旧版本数据时复制出的旧文件不会被自动清理；如需彻底清除，请同时检查 `%APPDATA%\QuickNote`。
+- 数据库使用 WAL 模式，删除前请确认应用已退出，否则 `-wal` / `-shm` 可能残留。
+
+## 变更与联系
+
+本说明会随功能变化更新，历史变更记录见 [CHANGELOG.md](../CHANGELOG.md)。如有隐私相关疑问，请在仓库 Issues 中提出：`https://github.com/your-github-name/ticknote/issues`。
+
+---
+
+## English summary
+
+- **No telemetry, no analytics, no accounts, no crash reporting, no update checks.**
+- All records live in a plain SQLite file at `%APPDATA%\TickNote\ticknote.db`; settings in the same folder.
+- The only outbound network request is the optional **AI polish** you explicitly trigger. It sends just the current input line (max 2000 chars) to the OpenAI-compatible endpoint and model you configure; the API key is encrypted with Electron `safeStorage` and never exposed to the renderer.
+- The MCP server runs locally over **stdio** and never opens a network port. Connected AI clients can read and write the same database.
+- Exports are manual Markdown files under `%APPDATA%\TickNote\export\`.
+- Deleting records: "Clear all records" in settings (permanent), or delete the `%APPDATA%\TickNote` folder. Uninstalling the app does **not** delete your data.

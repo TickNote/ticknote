@@ -1,0 +1,46 @@
+# 变更记录
+
+本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 格式，版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+
+## [0.1.0] - 2026-10-30
+
+首个公开版本：Windows 10/11 x64 的本地优先速记与待办应用（Electron + SQLite），内置 stdio MCP server。
+
+### Added
+
+- **速记捕获**：全局热键 `Ctrl+Shift+Space` 唤起无边框浮窗，`Enter` 保存、`Shift+Enter` 换行、`Esc` 取消；浮窗在鼠标所在显示器居中，支持拖动与右上角关闭，失焦自动隐藏，位置在本次运行内记忆并夹回工作区；中文输入法组合态下按 `Enter` 不误提交。
+- **主窗**：按创建日期分组（今天 / 昨天 / 更早），分组可折叠；全部 / 待办 / 便签 / 已完成筛选；`Ctrl+N` 聚焦底部输入框；`↑` `↓` 选中行、`Enter` 打开详情抽屉；`Esc` 按弹窗 → 设置 → 搜索 → 抽屉的顺序退出。
+- **搜索**：SQLite FTS5 `trigram` 全文检索（中文可用），少于 3 字符时回退 `LIKE`；输入 150ms 防抖。
+- **详情抽屉**：编辑正文（失焦保存）、切换待办 / 便签、设置提醒（今天 18:00 / 明天 9:00 / 自定义 / 清除）、完成 / 取消完成、复制、二次确认删除、上一条 / 下一条。
+- **提醒**：主进程每 30 秒扫描，到点发 Windows 系统通知，点击定位到对应记录；同一轮超过 3 条合并为一条；应用未运行期间错过的提醒在启动时合并提示。
+- **导出 Markdown**：按创建日期生成 `notes-YYYY-MM-DD.md`，范围支持全部 / 当前筛选 / 仅今天；主窗导出弹窗与托盘菜单两个入口。
+- **托盘与系统集成**：托盘常驻、关闭主窗只隐藏、托盘菜单（打开浮窗 / 打开主窗 / 今日未完成 / 导出 / 设置 / 退出）；开机自启（`--autostart` 只进托盘，安装版默认开启，以系统真实状态为准并提示被拦截的情况）；单实例锁。
+- **外观**：跟随系统 / 浅色 / 深色，两个窗口同步并持久化。
+- **设置面板**：录制式改全局热键（注册失败提示）、浮窗失焦隐藏、MCP 删除开关、AI 润色配置、清空全部记录（二次确认）、卸载入口；危险操作与数据保留说明集中在面板底部。
+- **AI 润色（可选，默认关闭）**：仅点击时调用，只发送当前一行到用户配置的 OpenAI 兼容端点（默认 `api.deepseek.com/v1` + `deepseek-chat`），3 秒超时；结果回显到输入框并支持撤销 / 失败重试，按 `Enter` 才落库；API Key 用 `safeStorage` 加密存储、可在设置中清除。
+- **MCP**：内置 stdio server（独立进程直连 SQLite，App 未启动也可用），提供 `create_item`、`list_items`、`search_items`、`update_item`、`complete_item`、`delete_item` 6 个工具；`delete_item` 默认不注册，需在设置开启并重启 AI 客户端后生效。
+- **安装与分发**：electron-builder NSIS 按用户安装（`TickNote-x.y.z-Setup.exe`，可改安装目录，桌面与开始菜单快捷方式），开始菜单额外生成「卸载 TickNote」；`npm run pack:portable` 生成便携 zip；仅保留 `zh-CN` / `en-US` 语言包并启用最大压缩。
+
+### Changed
+
+- **项目更名**：QuickNote → **TickNote**（中文「待办便签」）。程序名、安装包、快捷方式、AppUserModelId（`com.ticknote.app`）与 MCP 配置名统一为 TickNote；数据目录改为 `%APPDATA%\TickNote`，数据库文件名由 `quicknote.db` 改为 `ticknote.db`，首次启动自动从旧目录 / 旧文件名复制迁移一次。
+- **AI 行为调整**：由“解析后直接保存”改为“润色结果回显、用户确认后保存”，浮窗与主窗输入区都提供入口；设置里开启后才显示 AI 配置项。
+- **导出与详情入口整理**：导出与外观切换收进顶部 `⋯` 菜单；抽屉保存状态改为常驻小字提示；提醒 tag 跨天显示 `MM-DD HH:mm` 并对已过期项弱化。
+
+### Fixed
+
+- 打包后主进程启动报 `Cannot find module 'zod'`：改为把 zod 内联进主进程 bundle。
+- 热键最后一个空格漏进刚聚焦的浮窗输入框：唤起后 200ms 内丢弃空格。
+- 设置面板打开时 toast 被遮罩遮挡：提高 toast 层级。
+- 修改提醒时间后不再触发：设置提醒时同步重置 `reminded_at`。
+- 已完成记录仍被提醒：扫描只命中 `status='open'` 的记录。
+- 开发模式误写开机启动项：以 `process.defaultApp` 守卫，仅安装版写入。
+
+### Notes
+
+- 仅支持 **Windows 10/11 x64**。
+- 安装包与便携包均**未代码签名**，SmartScreen 提示“未知发布者”属预期。
+- 卸载**不会删除** `%APPDATA%\TickNote` 中的记录；如需彻底清除请手动删除该目录。
+- 删除为硬删除，没有回收站；MCP 写入不会实时推送到已打开的主窗。
+
+[0.1.0]: https://github.com/your-github-name/ticknote/releases/tag/v0.1.0
