@@ -1,3 +1,5 @@
+> 中文 | [English](CONTRIBUTING.en.md)
+
 # 贡献指南
 
 感谢你愿意改进 TickNote（待办便签）。这是一个 Windows-only 的 Electron 桌面应用，MIT 许可。改动前请先读 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) 与 [DESIGN.md](DESIGN.md)。

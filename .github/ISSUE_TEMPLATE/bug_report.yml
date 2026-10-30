@@ -1,5 +1,5 @@
-name: Bug 报告
-description: 反馈 TickNote 使用中遇到的问题（请先搜索已有 Issue）
+name: Bug 报告 / Bug report
+description: 反馈 TickNote 使用中遇到的问题（请先搜索已有 Issue）/ Report a problem you hit while using TickNote (please search existing issues first)
 title: '[Bug]: '
 labels:
   - bug
@@ -11,44 +11,48 @@ body:
 
         请注意：**不要粘贴 API Key、真实记录内容或完整的 `settings.json`**。
 
+        Thanks for the report! Please search existing issues first and provide reproduction steps where you can.
+
+        Note: **do not paste API keys, real record contents or a full `settings.json`**.
+
   - type: input
     id: version
     attributes:
-      label: TickNote 版本
-      description: 安装包文件名或设置面板中的版本号
-      placeholder: '例如 0.1.0'
+      label: 版本 / Version
+      description: 安装包文件名或设置面板中的版本号 / Installer file name or the version shown in the settings panel
+      placeholder: '例如 0.1.0 / e.g. 0.1.0'
     validations:
       required: true
 
   - type: dropdown
     id: install
     attributes:
-      label: 安装方式
+      label: 安装方式 / Install method
       options:
-        - Setup 安装包（TickNote-x.y.z-Setup.exe）
-        - 便携版 zip（TickNote-x.y.z-portable.zip）
-        - 开发模式（npm run dev / electron .）
+        - Setup 安装包 / Setup installer（TickNote-x.y.z-Setup.exe）
+        - 便携版 zip / Portable zip（TickNote-x.y.z-portable.zip）
+        - 开发模式 / Development mode（npm run dev / electron .）
     validations:
       required: true
 
   - type: input
     id: os
     attributes:
-      label: 系统版本
-      description: 按 Win + R 运行 winver 可查看 Windows 版本
-      placeholder: '例如 Windows 11 24H2 x64（10.0.26100）'
+      label: 系统版本 / OS version
+      description: 按 Win + R 运行 winver 可查看 Windows 版本 / Run winver via Win + R to check your Windows version
+      placeholder: '例如 Windows 11 24H2 x64（10.0.26100）/ e.g. Windows 11 24H2 x64 (10.0.26100)'
     validations:
       required: true
 
   - type: textarea
     id: steps
     attributes:
-      label: 复现步骤
-      description: 从启动开始，按顺序写清每一步
+      label: 复现步骤 / Steps to reproduce
+      description: 从启动开始，按顺序写清每一步 / Start from launch and list every step in order
       placeholder: |
-        1. 按 Ctrl+Shift+Space 唤起浮窗
-        2. 输入「明天交周报」并回车
-        3. 打开主窗点击该记录
+        1. 按 Ctrl+Shift+Space 唤起浮窗 / Press Ctrl+Shift+Space to summon the popup
+        2. 输入「明天交周报」并回车 / Type 「明天交周报」 and press Enter
+        3. 打开主窗点击该记录 / Open the main window and click that record
         4. ...
     validations:
       required: true
@@ -56,29 +60,29 @@ body:
   - type: textarea
     id: expected
     attributes:
-      label: 期望结果
-      placeholder: 描述你期望发生的结果
+      label: 期望结果 / Expected result
+      placeholder: 描述你期望发生的结果 / Describe what you expected to happen
     validations:
       required: true
 
   - type: textarea
     id: logs
     attributes:
-      label: 日志 / 截图
-      description: 开发模式可附终端输出；截图可直接拖入。请先清除敏感信息。
+      label: 日志与截图 / Logs and screenshots
+      description: 开发模式可附终端输出；截图可直接拖入。请先清除敏感信息。/ In development mode you can attach terminal output; screenshots can be dragged in. Remove sensitive information first.
       render: text
       placeholder: |
-        可粘贴报错、终端日志，或说明截图内容
+        可粘贴报错、终端日志，或说明截图内容 / Paste the error or terminal log here, or describe the screenshots
     validations:
       required: false
 
   - type: checkboxes
     id: features
     attributes:
-      label: 是否开启以下功能
-      description: 勾选与问题相关的项，便于定位
+      label: 是否开启以下功能 / Which features are enabled
+      description: 勾选与问题相关的项，便于定位 / Tick the ones relevant to the problem to help us narrow it down
       options:
-        - label: AI 润色（aiEnabled）
-        - label: MCP 删除工具（mcpDeleteEnabled）
-        - label: 开机自启
-        - label: 自定义数据目录或环境变量（TICKNOTE_DATA / TICKNOTE_DB）
+        - label: AI 润色（aiEnabled）/ AI polish (aiEnabled)
+        - label: MCP 删除工具（mcpDeleteEnabled）/ MCP delete tool (mcpDeleteEnabled)
+        - label: 开机自启 / Launch at login
+        - label: 自定义数据目录或环境变量（TICKNOTE_DATA / TICKNOTE_DB）/ Custom data directory or environment variables (TICKNOTE_DATA / TICKNOTE_DB)

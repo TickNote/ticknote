@@ -50,4 +50,5 @@ jobs:
             release/*-Setup.exe
             release/*-portable.zip
             release/SHA256SUMS.txt
+          generate_release_notes: true
           draft: true

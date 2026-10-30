@@ -1,5 +1,5 @@
-name: 功能建议
-description: 提出新功能或对现有行为的改进建议
+name: 功能建议 / Feature request
+description: 提出新功能或对现有行为的改进建议 / Suggest a new feature or an improvement to existing behavior
 title: '[Feature]: '
 labels:
   - enhancement
@@ -11,42 +11,46 @@ body:
 
         提交前请先搜索已有 Issue，避免重复。
 
+        Thanks for the suggestion! TickNote is meant to be “zero-friction capture + simple todos”, so describe your use case first and then how you would like it to work.
+
+        Please search existing issues before submitting to avoid duplicates.
+
   - type: textarea
     id: scenario
     attributes:
-      label: 需求场景
-      description: 你在什么情况下需要这个功能？现在是怎么绕过的？
+      label: 需求场景 / Use case
+      description: 你在什么情况下需要这个功能？现在是怎么绕过的？ / When do you need this feature? How do you work around it today?
       placeholder: |
-        例如：我经常在会议中记录多条待办，结束后想一次性导出……
+        例如：我经常在会议中记录多条待办，结束后想一次性导出…… / e.g. I often capture several todos during meetings and want to export them all at once afterwards…
     validations:
       required: true
 
   - type: textarea
     id: behavior
     attributes:
-      label: 期望行为
-      description: 你希望 TickNote 具体怎么表现？交互、入口、快捷键都可以描述。
+      label: 期望行为 / Expected behavior
+      description: 你希望 TickNote 具体怎么表现？交互、入口、快捷键都可以描述。 / How exactly should TickNote behave? Feel free to describe the interaction, entry point and shortcuts.
       placeholder: |
-        例如：在抽屉里增加一个「复制为 Markdown」按钮，点击后……
+        例如：在抽屉里增加一个「复制为 Markdown」按钮，点击后…… / e.g. add a 「复制为 Markdown」 button to the drawer that, when clicked…
     validations:
       required: true
 
   - type: textarea
     id: alternatives
     attributes:
-      label: 替代方案
-      description: 你考虑过的其他做法，或现有功能能否部分满足
+      label: 替代方案 / Alternatives
+      description: 你考虑过的其他做法，或现有功能能否部分满足 / Other approaches you considered, or whether existing features already cover part of it
     validations:
       required: false
 
   - type: dropdown
     id: pr
     attributes:
-      label: 是否愿意提交 PR
+      label: 是否愿意提交 PR / Willing to submit a PR
       options:
-        - 愿意，我可以实现
-        - 愿意，但需要维护者指导
-        - 可以帮忙测试或补充文档
-        - 暂时不方便
+        - 愿意，我可以实现 / Yes, I can implement it
+        - 愿意，但需要维护者指导 / Yes, but I would need maintainer guidance
+        - 可以帮忙测试或补充文档 / I can help with testing or documentation
+        - 暂时不方便 / Not at the moment
     validations:
       required: true

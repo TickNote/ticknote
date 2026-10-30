@@ -1,3 +1,5 @@
+> [English](README.md) | 中文
+
 # TickNote（待办便签）
 
 **面向 Windows 的本地优先速记与待办工具，可选 AI 润色与 MCP 集成。**
@@ -130,14 +132,17 @@ npm run dev
 
 ## 文档
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) —— 三层结构、IPC 契约、数据库、安全模型、扩展指南
-- [docs/MCP.md](docs/MCP.md) —— MCP 配置与工具说明
-- [docs/PRIVACY.md](docs/PRIVACY.md) —— 数据处理说明
+中英文版本并列列出：
+
+- 架构说明：[中文](docs/ARCHITECTURE.md) · [English](docs/ARCHITECTURE.en.md) —— 三层结构、IPC 契约、数据库、安全模型、扩展指南
+- MCP：[中文](docs/MCP.md) · [English](docs/MCP.en.md) —— MCP 配置与工具说明
+- 隐私：[中文](docs/PRIVACY.md) · [English](docs/PRIVACY.en.md) —— 数据处理说明
+- 贡献指南：[中文](CONTRIBUTING.md) · [English](CONTRIBUTING.en.md)
+- 安全策略：[中文](SECURITY.md) · [English](SECURITY.en.md)
+- 行为准则：[中文](CODE_OF_CONDUCT.md) · [English](CODE_OF_CONDUCT.en.md)
 - [DESIGN.md](DESIGN.md) —— 完整产品与设计文档
-- [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [CHANGELOG.md](CHANGELOG.md)
+- [CHANGELOG.md](CHANGELOG.md) —— 版本变更记录
 
 ## 许可证
 
 MIT © TickNote Contributors，详见 [LICENSE](LICENSE)。
-
-English version: [README.md](README.md)

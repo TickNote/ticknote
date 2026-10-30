@@ -1,3 +1,5 @@
+> 中文 | [English](CODE_OF_CONDUCT.en.md)
+
 # 贡献者行为准则
 
 > 本文件是 [Contributor Covenant 2.1](https://www.contributor-covenant.org/version/2/1/code_of_conduct/) 的精简中文版，适用于本仓库的 Issue、Pull Request、讨论区及其他由项目维护者管理的空间。

@@ -1,3 +1,5 @@
+> English | [中文](README.zh-CN.md)
+
 # TickNote
 
 **Local-first quick notes and todos for Windows — with optional AI polish and MCP integration.**
@@ -130,11 +132,16 @@ Full details: [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## Documentation
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — process layout, IPC contract, database, security model, extension guide
-- [docs/MCP.md](docs/MCP.md) — MCP server setup and tools
-- [docs/PRIVACY.md](docs/PRIVACY.md) — data handling
+Both language versions are listed side by side:
+
+- Architecture: [中文](docs/ARCHITECTURE.md) · [English](docs/ARCHITECTURE.en.md) — process layout, IPC contract, database, security model, extension guide
+- MCP: [中文](docs/MCP.md) · [English](docs/MCP.en.md) — MCP server setup and tools
+- Privacy: [中文](docs/PRIVACY.md) · [English](docs/PRIVACY.en.md) — data handling
+- Contributing: [中文](CONTRIBUTING.md) · [English](CONTRIBUTING.en.md)
+- Security policy: [中文](SECURITY.md) · [English](SECURITY.en.md)
+- Code of conduct: [中文](CODE_OF_CONDUCT.md) · [English](CODE_OF_CONDUCT.en.md)
 - [DESIGN.md](DESIGN.md) — full product/design spec (Chinese)
-- [CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md) · [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) · [CHANGELOG.md](CHANGELOG.md)
+- [CHANGELOG.md](CHANGELOG.md) — release history
 
 ## License
 

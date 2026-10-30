@@ -1,3 +1,5 @@
+> 中文 | [English](PRIVACY.en.md)
+
 # 隐私说明
 
 > 适用于 TickNote（待办便签）0.1.0，Windows 桌面版及其内置 MCP server。
@@ -76,13 +78,4 @@ TickNote 是本地优先的单机工具：**不收集任何遥测数据，不做
 
 本说明会随功能变化更新，历史变更记录见 [CHANGELOG.md](../CHANGELOG.md)。如有隐私相关疑问，请在仓库 Issues 中提出：`https://github.com/TickNote/ticknote/issues`。
 
----
-
-## English summary
-
-- **No telemetry, no analytics, no accounts, no crash reporting, no update checks.**
-- All records live in a plain SQLite file at `%APPDATA%\TickNote\ticknote.db`; settings in the same folder.
-- The only outbound network request is the optional **AI polish** you explicitly trigger. It sends just the current input line (max 2000 chars) to the OpenAI-compatible endpoint and model you configure; the API key is encrypted with Electron `safeStorage` and never exposed to the renderer.
-- The MCP server runs locally over **stdio** and never opens a network port. Connected AI clients can read and write the same database.
-- Exports are manual Markdown files under `%APPDATA%\TickNote\export\`.
-- Deleting records: "Clear all records" in settings (permanent), or delete the `%APPDATA%\TickNote` folder. Uninstalling the app does **not** delete your data.
+完整英文版见 [docs/PRIVACY.en.md](PRIVACY.en.md)。

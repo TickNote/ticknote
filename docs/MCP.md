@@ -1,3 +1,5 @@
+> 中文 | [English](MCP.en.md)
+
 # MCP 集成
 
 TickNote 内置一个 stdio MCP server，让任何支持 Model Context Protocol 的 AI 客户端（Claude Desktop、Cursor、Trae 等）读写同一份本地记录。

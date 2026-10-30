@@ -1,3 +1,5 @@
+> 中文 | [English](ARCHITECTURE.en.md)
+
 # TickNote 架构说明
 
 > 面向贡献者的实现级说明。产品/交互的完整规格见仓库根目录的 [DESIGN.md](../DESIGN.md)；MCP 客户端配置见 [MCP.md](MCP.md)。
