@@ -8,6 +8,7 @@ export const IPC = {
   itemsUpdate: 'items:update',
   itemsSetKind: 'items:set-kind',
   itemsDelete: 'items:delete',
+  itemsRestoreDeleted: 'items:restore-deleted',
   itemsClearAll: 'items:clear-all',
   itemsSetReminder: 'items:set-reminder',
   itemsStats: 'items:stats',

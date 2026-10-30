@@ -9,9 +9,18 @@ export interface ListItemProps {
   highlight: boolean;
   onClick: () => void;
   onToggleStatus: (event: MouseEvent) => void;
+  onDelete: () => void;
 }
 
-export function ListItem({ item, selected, cursor, highlight, onClick, onToggleStatus }: ListItemProps) {
+export function ListItem({
+  item,
+  selected,
+  cursor,
+  highlight,
+  onClick,
+  onToggleStatus,
+  onDelete,
+}: ListItemProps) {
   return (
     <div
       className={`row${selected ? ' selected' : ''}${cursor ? ' cursor' : ''}${highlight ? ' highlight' : ''}`}
@@ -50,6 +59,18 @@ export function ListItem({ item, selected, cursor, highlight, onClick, onToggleS
         </span>
       ) : null}
       <span className="time">{formatTime(item.createdAt)}</span>
+      <button
+        type="button"
+        className="row-delete"
+        title="删除"
+        aria-label="删除这条记录"
+        onClick={(event) => {
+          event.stopPropagation();
+          onDelete();
+        }}
+      >
+        ×
+      </button>
     </div>
   );
 }

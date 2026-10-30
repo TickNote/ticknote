@@ -27,6 +27,8 @@ const api = {
   setItemKind: (id: string, kind: ItemKind): Promise<Item | null> =>
     ipcRenderer.invoke(IPC.itemsSetKind, { id, kind }),
   deleteItem: (id: string): Promise<boolean> => ipcRenderer.invoke(IPC.itemsDelete, { id }),
+  restoreDeletedItem: (item: Item): Promise<Item | null> =>
+    ipcRenderer.invoke(IPC.itemsRestoreDeleted, { item }),
   clearAllItems: (): Promise<number> => ipcRenderer.invoke(IPC.itemsClearAll),
   setReminder: (id: string, remindAt: number | null): Promise<Item | null> =>
     ipcRenderer.invoke(IPC.itemsSetReminder, { id, remindAt }),

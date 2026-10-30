@@ -33,6 +33,7 @@ export interface Repo {
   updateContent(id: string, content: string): Item | null;
   update(id: string, patch: UpdateItemPatch): Item | null;
   remove(id: string): boolean;
+  restore(item: Item): Item | null;
   clearAll(): number;
   setReminder(id: string, remindAt: number | null): Item | null;
   dueReminders(now: number): Item[];
@@ -278,6 +279,27 @@ export function openRepo(dbPath: string): Repo {
     return rows.map(mapRow);
   };
 
+  // 撤销删除：按原 id / 时间戳写回，FTS 由触发器重建
+  const restore = (item: Item): Item | null => {
+    db.prepare(
+      `INSERT OR IGNORE INTO items
+       (id, content, kind, status, remind_at, reminded_at, created_at, updated_at, completed_at, source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      item.id,
+      item.content,
+      item.kind,
+      item.status,
+      item.remindAt,
+      item.remindedAt,
+      item.createdAt,
+      Math.max(Date.now(), item.updatedAt),
+      item.completedAt,
+      item.source,
+    );
+    return get(item.id);
+  };
+
   const clearAll = (): number => {
     const row = db.prepare('SELECT COUNT(*) AS c FROM items').get() as Row | undefined;
     db.exec('DELETE FROM items');
@@ -295,6 +317,7 @@ export function openRepo(dbPath: string): Repo {
     updateContent,
     update,
     remove,
+    restore,
     clearAll,
     setReminder,
     dueReminders,

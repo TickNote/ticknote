@@ -1,4 +1,4 @@
-# TickNote（待办便签）设计文档（v1.10）
+# TickNote（待办便签）设计文档（v1.11）
 
 > 状态：设计已确认 · Electron / SQLite / MCP stdio
 > 产品定位：记录内容与创建时间，不做任务调度。
@@ -259,6 +259,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - 点击整行（便签、待办均可）从右侧滑出详情抽屉（宽 360）；列表滚动位置不变，当前行用左侧色条标记。
 - 行首复选框是例外：点击只切换该待办的完成状态，不打开抽屉；点击其余区域才打开。
 - 行首固定 14px 类型槽：待办是复选框，便签是灰色文档小图标，两者文字左对齐；全部列表里可一眼区分类型。
+- 行尾在悬停 / 选中时出现 `×`：点击直接删除，toast 提供 5 秒「撤销」（按原 id、时间、状态与提醒写回）；抽屉内的二次确认删除保留作为兜底。
 - 抽屉内容：类型（可在待办/便签间切换）+ 创建时间、正文（`P1` 起可直接编辑、失焦保存）、提醒、状态；底部操作：完成 / 设提醒 / 复制 / 删除。
 - `Esc` 或右上角 × 关闭抽屉；`↑` `↓` 在列表中移动选中，`Enter` 打开抽屉。
 - 不做居中弹窗卡片：会遮挡列表，也会打断连续浏览的节奏。
@@ -277,6 +278,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 | `items:update` | `{id, content}` | `Item` | 抽屉内编辑正文，刷新 `updated_at` |
 | `items:set-kind` | `{id, kind:'todo'\|'note'}` | `Item` | 已记录条目切换类型，保留状态与创建时间 |
 | `items:delete` | `{id}` | `boolean` | 硬删除（无回收站） |
+| `items:restore-deleted` | `{item}` | `Item` | 行内删除的撤销：按原 id/时间/状态写回 |
 | `items:set-reminder` | `{id, remindAt}` | `Item` | 设置提醒，传 `null` 清除；同时重置 `reminded_at` |
 | `items:complete` | `{id}` | `Item` | 完成 |
 | `items:restore` | `{id}` | `Item` | 取消完成 |
@@ -569,6 +571,7 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 | 2026-10-30 | v1.8 | 浮窗（无边框）新增 18px 拖动条（`-webkit-app-region: drag`）+ 右上角关闭 `×`（`hideCapture`，不退出应用）；拖动位置在本次运行内记忆，再次唤起沿用并对多显示器越界做 clamp；浮窗高度基准 94→120、主进程高度上限 210→240 |
 | 2026-10-30 | v1.9 | 已记录条目支持在抽屉内切换「待办 / 便签」：新增 `items:set-kind`（zod 校验）、preload `setItemKind`、mock 同步；切换保留状态与创建时间，列表按当前筛选自动刷新 |
 | 2026-10-30 | v1.10 | 开源化：主进程拆分为 `windows/tray/ipc/settings`，渲染层拆出 `components/` 与 `utils.ts`（main.tsx 1380→803 行）；去 QuickNote 化（appId `com.ticknote.app`、DB 改名 `ticknote.db` 并兼容迁移、localStorage key）；Electron 安全加固（CSP、`sandbox:true`、禁止新窗与跳转、preload 缺失时快速失败）；补充 MIT LICENSE、README 中英、CONTRIBUTING/SECURITY/CODE_OF_CONDUCT/CHANGELOG、docs/ARCHITECTURE|MCP|PRIVACY、CI/Release 工作流、Issue/PR 模板、dependabot、oxlint/Prettier、Vitest 单测、`.editorconfig/.gitattributes/.nvmrc` |
+| 2026-10-30 | v1.11 | 列表行内删除：悬停/选中显示 `×`，删除后 toast 提供 5 秒「撤销」（`items:restore-deleted` + `repo.restore`，按原 id/时间/状态/提醒写回）；主窗移除顶部「待办便签」品牌字；导出改为主窗弹文件夹选择框（托盘仍静默写上次目录） |
 
 ---
 

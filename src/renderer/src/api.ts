@@ -90,6 +90,11 @@ function createMockApi(): Api {
       notify();
       return existed;
     },
+    async restoreDeletedItem(item) {
+      items = [...items.filter((i) => i.id !== item.id), item].sort((a, b) => b.createdAt - a.createdAt);
+      notify();
+      return items.find((i) => i.id === item.id) ?? null;
+    },
     async clearAllItems() {
       const count = items.length;
       items = [];

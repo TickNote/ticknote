@@ -129,6 +129,26 @@ export function setupIpc(deps: IpcDependencies): void {
     return removed;
   });
 
+  // 行内删除的撤销：把完整记录按原 id / 时间写回
+  ipcMain.handle(IPC.itemsRestoreDeleted, (_event, payload: unknown) => {
+    const itemSchema = z.object({
+      id: z.string().uuid(),
+      content: z.string().min(1).max(2000),
+      kind: z.enum(['note', 'todo']),
+      status: z.enum(['open', 'done']),
+      remindAt: z.number().int().nonnegative().nullable(),
+      remindedAt: z.number().int().nonnegative().nullable(),
+      createdAt: z.number().int().nonnegative(),
+      updatedAt: z.number().int().nonnegative(),
+      completedAt: z.number().int().nonnegative().nullable(),
+      source: z.enum(['human', 'ai']),
+    });
+    const { item } = z.object({ item: itemSchema }).parse(payload);
+    const restored = repo.restore(item);
+    if (restored) deps.notifyItemsChanged();
+    return restored;
+  });
+
   ipcMain.handle(IPC.itemsClearAll, () => {
     const removed = repo.clearAll();
     deps.notifyItemsChanged();

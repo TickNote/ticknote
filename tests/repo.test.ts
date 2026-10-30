@@ -110,6 +110,22 @@ test('repo：增删改查、分页、提醒、类型切换、清空', async () =
     assert.equal(repo.dueReminders(Date.now()).length, 0, '已完成任务不参与提醒');
     assert.equal(repo.stats(0).pendingReminders, 0, '已完成任务的提醒不计入待提醒统计');
 
+    // 撤销删除：按原 id / 时间 / 状态 / 提醒完整写回
+    const undoItem = repo.create({ content: '撤销删除测试', kind: 'todo' });
+    repo.setStatus(undoItem.id, true);
+    repo.setReminder(undoItem.id, Date.now() + 3_600_000);
+    const snapshot = repo.get(undoItem.id);
+    assert.ok(snapshot);
+    assert.equal(repo.remove(undoItem.id), true);
+    assert.equal(repo.get(undoItem.id), null);
+    const restoredFromUndo = repo.restore(snapshot);
+    assert.equal(restoredFromUndo?.id, snapshot.id);
+    assert.equal(restoredFromUndo?.status, 'done');
+    assert.equal(restoredFromUndo?.createdAt, snapshot.createdAt);
+    assert.equal(restoredFromUndo?.remindAt, snapshot.remindAt);
+    assert.equal(repo.search('撤销删除').length, 1, '撤销后 FTS 应重建');
+    assert.equal(repo.restore(snapshot)?.id, snapshot.id, '重复撤销应幂等');
+
     // 导出用全量查询包含所有记录
     assert.ok(repo.allForExport().length > 50);
 

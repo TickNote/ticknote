@@ -16,7 +16,7 @@ import { Drawer } from './components/Drawer';
 import { ExportDialog } from './components/ExportDialog';
 import { ListItem } from './components/ListItem';
 import { SettingsPanel } from './components/SettingsPanel';
-import { Toast } from './components/Toast';
+import { Toast, type ToastAction } from './components/Toast';
 import { TopBar } from './components/TopBar';
 import { FILTERS, KINDS, PAGE, acceleratorFromEvent, formatRemind, groupByDay, kindLabel } from './utils';
 import './styles.css';
@@ -45,6 +45,7 @@ export function App() {
   const [deleteArmed, setDeleteArmed] = useState(false);
   const [customReminder, setCustomReminder] = useState(false);
   const [toast, setToast] = useState('');
+  const [toastAction, setToastAction] = useState<ToastAction | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsData, setSettingsData] = useState<Settings | null>(null);
   const [autostart, setAutostart] = useState<AutostartStatus | null>(null);
@@ -311,10 +312,14 @@ export function App() {
     });
   }, []);
 
-  const showToast = useCallback((text: string) => {
+  const showToast = useCallback((text: string, action: ToastAction | null = null, duration = 2600) => {
     setToast(text);
+    setToastAction(action);
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToast(''), 2600);
+    toastTimer.current = window.setTimeout(() => {
+      setToast('');
+      setToastAction(null);
+    }, duration);
   }, []);
 
   const updateLocal = useCallback((updated: Item) => {
@@ -334,6 +339,34 @@ export function App() {
       showToast(`已改为${kindLabel(next)}`);
     },
     [selected, showToast, updateLocal],
+  );
+
+  // 行内删除 + 5 秒撤销；撤销按原 id / 时间写回
+  const restoreDeleted = useCallback(
+    async (target: Item) => {
+      const restored = await api.restoreDeletedItem(target);
+      if (!restored) return;
+      await load();
+      const text = query.trim();
+      if (text) setResults(await api.searchItems(text, 50));
+      await refreshStats();
+      showToast('已恢复');
+    },
+    [load, query, refreshStats, showToast],
+  );
+
+  const deleteFromList = useCallback(
+    async (target: Item) => {
+      const removed = await api.deleteItem(target.id);
+      if (!removed) return;
+      setItems((previous) => previous.filter((item) => item.id !== target.id));
+      setResults((previous) => (previous ? previous.filter((item) => item.id !== target.id) : previous));
+      if (selectedId === target.id) setSelectedId(null);
+      if (cursorId === target.id) setCursorId(null);
+      await refreshStats();
+      showToast('已删除', { label: '撤销', onClick: () => void restoreDeleted(target) }, 5000);
+    },
+    [cursorId, refreshStats, restoreDeleted, selectedId, showToast],
   );
 
   // 抽屉切换选中项时重置编辑内容与删除确认
@@ -652,6 +685,7 @@ export function App() {
                           setSelectedId(item.id);
                         }}
                         onToggleStatus={(event) => void toggleStatus(item, event)}
+                        onDelete={() => void deleteFromList(item)}
                       />
                     ))}
               </section>
@@ -799,7 +833,7 @@ export function App() {
         />
       ) : null}
 
-      <Toast text={toast} />
+      <Toast text={toast} action={toastAction} />
     </div>
   );
 }
