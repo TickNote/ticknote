@@ -28,5 +28,13 @@ jobs:
       - name: Build app and MCP server
         run: npm run build:all
 
+      - name: Ensure Electron runtime
+        shell: pwsh
+        run: |
+          if (-not (Test-Path node_modules/electron/dist/electron.exe)) {
+            node node_modules/electron/install.js
+          }
+          Test-Path node_modules/electron/dist/electron.exe
+
       - name: Test
         run: npm test

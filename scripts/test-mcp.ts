@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -99,14 +99,18 @@ async function main() {
 
   // 安装包场景：用 Electron 自带运行时以 Node 模式执行同一份 MCP 单文件
   const electronCli = resolve(__dirname, '../node_modules/electron/dist/electron.exe');
-  client = await startClient(env, electronCli, { ELECTRON_RUN_AS_NODE: '1' });
-  const electronTools = await client.listTools();
-  assert.equal(electronTools.tools.length, 6, 'Electron 运行时下应注册 6 个工具');
-  const viaElectron = parse(
-    (await client.callTool({ name: 'create_item', arguments: { content: 'Electron 运行时创建', kind: 'note' } })) as ToolResult,
-  );
-  assert.equal(viaElectron.content, 'Electron 运行时创建');
-  await client.close();
+  if (!existsSync(electronCli)) {
+    console.warn('[mcp] electron runtime not found, skip electron-runtime check');
+  } else {
+    client = await startClient(env, electronCli, { ELECTRON_RUN_AS_NODE: '1' });
+    const electronTools = await client.listTools();
+    assert.equal(electronTools.tools.length, 6, 'Electron 运行时下应注册 6 个工具');
+    const viaElectron = parse(
+      (await client.callTool({ name: 'create_item', arguments: { content: 'Electron 运行时创建', kind: 'note' } })) as ToolResult,
+    );
+    assert.equal(viaElectron.content, 'Electron 运行时创建');
+    await client.close();
+  }
 
   rmSync(dir, { recursive: true, force: true });
   console.log('mcp tests passed');
