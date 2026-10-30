@@ -6,7 +6,19 @@
 
 按 `Ctrl+Shift+Space` 弹出浮窗，写一行，回车，窗口消失。所有记录都存在本机的一个 SQLite 文件里，按创建日期排列；任何支持 MCP 的 AI 客户端都能读写同一份数据。
 
-<!-- TODO: add screenshots before launch -->
+## 截图
+
+![捕获浮窗](docs/screenshots/capture.png)
+
+![主窗](docs/screenshots/main.png)
+
+| 搜索高亮                             | 详情抽屉                             |
+| ------------------------------------ | ------------------------------------ |
+| ![搜索](docs/screenshots/search.png) | ![抽屉](docs/screenshots/drawer.png) |
+
+| 导出范围选择                         | 设置面板                               |
+| ------------------------------------ | -------------------------------------- |
+| ![导出](docs/screenshots/export.png) | ![设置](docs/screenshots/settings.png) |
 
 ## 功能
 

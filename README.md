@@ -6,7 +6,19 @@
 
 TickNote (Chinese name 「待办便签」) is a tray-resident scratchpad. Press `Ctrl+Shift+Space`, type one line, hit `Enter`, and the popup disappears. Everything is stored in a single SQLite file on your machine, listed by creation date, and any MCP-capable AI client can read and write the same data.
 
-<!-- TODO: add screenshots before launch -->
+## Screenshots
+
+![Capture popup](docs/screenshots/capture.png)
+
+![Main window](docs/screenshots/main.png)
+
+| Search with highlighted hits           | Details drawer                         |
+| -------------------------------------- | -------------------------------------- |
+| ![Search](docs/screenshots/search.png) | ![Drawer](docs/screenshots/drawer.png) |
+
+| Export scope selection                 | Settings                                   |
+| -------------------------------------- | ------------------------------------------ |
+| ![Export](docs/screenshots/export.png) | ![Settings](docs/screenshots/settings.png) |
 
 ## Features
 

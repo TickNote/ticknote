@@ -265,8 +265,11 @@ textarea {
 
 .group-chevron {
   display: inline-block;
-  width: 14px;
+  width: 18px;
+  font-size: 14px;
+  line-height: 1;
   color: var(--muted);
+  vertical-align: middle;
 }
 
 .group-head .count {
