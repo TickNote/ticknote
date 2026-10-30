@@ -2,12 +2,14 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC } from '../shared/ipc';
 import type {
   AiParseResult,
+  BackupResult,
   AutostartStatus,
   CreateItemInput,
   ExportResult,
   ExportScope,
   Item,
   ItemKind,
+  ItemStats,
   ListQuery,
   Settings,
   SettingsPatch,
@@ -18,7 +20,8 @@ import type {
 const api = {
   createItem: (input: CreateItemInput): Promise<Item> => ipcRenderer.invoke(IPC.itemsCreate, input),
   listItems: (query: ListQuery): Promise<Item[]> => ipcRenderer.invoke(IPC.itemsList, query),
-  searchItems: (q: string, limit?: number): Promise<Item[]> => ipcRenderer.invoke(IPC.itemsSearch, { q, limit }),
+  searchItems: (q: string, limit?: number): Promise<Item[]> =>
+    ipcRenderer.invoke(IPC.itemsSearch, { q, limit }),
   getItem: (id: string): Promise<Item | null> => ipcRenderer.invoke(IPC.itemsGet, { id }),
   completeItem: (id: string): Promise<Item | null> => ipcRenderer.invoke(IPC.itemsComplete, { id }),
   restoreItem: (id: string): Promise<Item | null> => ipcRenderer.invoke(IPC.itemsRestore, { id }),
@@ -34,16 +37,17 @@ const api = {
     ipcRenderer.invoke(IPC.itemsSetReminder, { id, remindAt }),
   exportMarkdown: (scope: ExportScope = 'all'): Promise<ExportResult | null> =>
     ipcRenderer.invoke(IPC.exportMarkdown, { scope }),
-  stats: (): Promise<{ todayOpenTodos: number; pendingReminders: number }> =>
-    ipcRenderer.invoke(IPC.itemsStats),
+  exportBackup: (): Promise<BackupResult | null> => ipcRenderer.invoke(IPC.backupExport),
+  importBackup: (): Promise<BackupResult | null> => ipcRenderer.invoke(IPC.backupImport),
+  stats: (): Promise<ItemStats> => ipcRenderer.invoke(IPC.itemsStats),
   getSettings: (): Promise<Settings> => ipcRenderer.invoke(IPC.settingsGet),
   updateSettings: (patch: SettingsPatch): Promise<Settings> => ipcRenderer.invoke(IPC.settingsSet, patch),
-  setTheme: (theme: ThemePreference): Promise<Settings> =>
-    ipcRenderer.invoke(IPC.settingsSet, { theme }),
+  setTheme: (theme: ThemePreference): Promise<Settings> => ipcRenderer.invoke(IPC.settingsSet, { theme }),
   getAutostart: (): Promise<AutostartStatus> => ipcRenderer.invoke(IPC.autostartGet),
   setAutostart: (enabled: boolean): Promise<AutostartStatus> =>
     ipcRenderer.invoke(IPC.autostartSet, { enabled }),
   aiParse: (content: string): Promise<AiParseResult | null> => ipcRenderer.invoke(IPC.aiParse, { content }),
+  testAi: (): Promise<string> => ipcRenderer.invoke(IPC.aiTest),
   uninstallApp: (): Promise<UninstallResult> => ipcRenderer.invoke(IPC.appUninstall),
   hideCapture: (): void => {
     ipcRenderer.send(IPC.captureHide);

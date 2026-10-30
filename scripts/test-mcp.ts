@@ -44,6 +44,12 @@ async function main() {
   const env = { TICKNOTE_DB: dbPath };
 
   let client = await startClient(env);
+  const invalidCreate = (await client.callTool({
+    name: 'create_item',
+    arguments: { content: '无效提醒不应落库', remind_at: 'not-a-date' },
+  })) as ToolResult;
+  assert.equal(invalidCreate.isError, true);
+  assert.equal(parse((await client.callTool({ name: 'list_items', arguments: {} })) as ToolResult).count, 0);
   const tools = await client.listTools();
   assert.deepEqual(
     tools.tools.map((t) => t.name).sort(),
@@ -51,27 +57,42 @@ async function main() {
     '默认不应注册 delete_item',
   );
 
-  const created = parse((await client.callTool({ name: 'create_item', arguments: { content: 'AI 创建的中文记录', kind: 'todo' } })) as ToolResult);
+  const created = parse(
+    (await client.callTool({
+      name: 'create_item',
+      arguments: { content: 'AI 创建的中文记录', kind: 'todo' },
+    })) as ToolResult,
+  );
   assert.equal(created.content, 'AI 创建的中文记录');
   assert.equal(created.source, 'ai');
   const id = String(created.id);
 
-  const found = parse((await client.callTool({ name: 'search_items', arguments: { q: '中文记录' } })) as ToolResult);
+  const found = parse(
+    (await client.callTool({ name: 'search_items', arguments: { q: '中文记录' } })) as ToolResult,
+  );
   assert.equal(found.count, 1);
 
-  const listed = parse((await client.callTool({ name: 'list_items', arguments: { status: 'open' } })) as ToolResult);
+  const listed = parse(
+    (await client.callTool({ name: 'list_items', arguments: { status: 'open' } })) as ToolResult,
+  );
   assert.equal(listed.count, 1);
 
   const updated = parse(
     (await client.callTool({
       name: 'update_item',
-      arguments: { id, content: 'AI 更新后的内容', remind_at: new Date(Date.now() + 3_600_000).toISOString() },
+      arguments: {
+        id,
+        content: 'AI 更新后的内容',
+        remind_at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
     })) as ToolResult,
   );
   assert.equal(updated.content, 'AI 更新后的内容');
   assert.ok(updated.remind_at);
 
-  const completed = parse((await client.callTool({ name: 'complete_item', arguments: { id } })) as ToolResult);
+  const completed = parse(
+    (await client.callTool({ name: 'complete_item', arguments: { id } })) as ToolResult,
+  );
   assert.equal(completed.status, 'done');
 
   const delAttempt = (await client.callTool({
@@ -87,12 +108,19 @@ async function main() {
   writeFileSync(settingsPath, JSON.stringify({ mcpDeleteEnabled: true }), 'utf8');
   client = await startClient(env);
   const tools2 = await client.listTools();
-  assert.ok(tools2.tools.some((t) => t.name === 'delete_item'), '开启后应注册 delete_item');
+  assert.ok(
+    tools2.tools.some((t) => t.name === 'delete_item'),
+    '开启后应注册 delete_item',
+  );
 
-  const deleted = parse((await client.callTool({ name: 'delete_item', arguments: { id, confirm: true } })) as ToolResult);
+  const deleted = parse(
+    (await client.callTool({ name: 'delete_item', arguments: { id, confirm: true } })) as ToolResult,
+  );
   assert.equal(deleted.deleted, true);
 
-  const foundAfter = parse((await client.callTool({ name: 'search_items', arguments: { q: 'AI 更新后的内容' } })) as ToolResult);
+  const foundAfter = parse(
+    (await client.callTool({ name: 'search_items', arguments: { q: 'AI 更新后的内容' } })) as ToolResult,
+  );
   assert.equal(foundAfter.count, 0);
 
   await client.close();
@@ -106,7 +134,10 @@ async function main() {
     const electronTools = await client.listTools();
     assert.equal(electronTools.tools.length, 6, 'Electron 运行时下应注册 6 个工具');
     const viaElectron = parse(
-      (await client.callTool({ name: 'create_item', arguments: { content: 'Electron 运行时创建', kind: 'note' } })) as ToolResult,
+      (await client.callTool({
+        name: 'create_item',
+        arguments: { content: 'Electron 运行时创建', kind: 'note' },
+      })) as ToolResult,
     );
     assert.equal(viaElectron.content, 'Electron 运行时创建');
     await client.close();

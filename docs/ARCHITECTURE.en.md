@@ -1,6 +1,6 @@
 > [中文](ARCHITECTURE.md) | English
 
-# TickNote architecture
+# TickNote architecture (0.1.1)
 
 > An implementation-level description for contributors. The full product/interaction spec lives in [DESIGN.md](../DESIGN.md) at the repository root; MCP client configuration is in [MCP.en.md](MCP.en.md).
 
@@ -85,10 +85,12 @@ ticknote/
 │  │     ├─ capture.tsx        # popup: input / kind switch / AI polish / auto height
 │  │     ├─ api.ts             # renderer-side API wrapper; uses mocks when previewing in a browser
 │  │     ├─ utils.ts           # date grouping, time formatting, hotkey → accelerator
+│  │     ├─ hooks.ts           # Draft persistence / errors / dialog focus
 │  │     ├─ styles.css         # styles shared by both windows
 │  │     └─ components/        # TopBar / ListItem / Drawer / SettingsPanel / ExportDialog / Toast
 │  ├─ shared/
 │  │  ├─ ipc.ts                # IPC channel name constants
+│  │  ├─ validation.ts         # Item / versioned backup validation
 │  │  └─ types.ts              # Item / Settings / query and result DTOs
 │  └─ mcp/
 │     └─ server.ts             # stdio MCP server (standalone process entry)
@@ -97,6 +99,8 @@ ticknote/
 ├─ tests/
 │  ├─ repo.test.ts             # repository layer: paging / FTS / reminders / clear-all
 │  ├─ export.test.ts           # Markdown export format
+│  ├─ reliability.test.ts      # Paging ties / literal search / export / backup restore
+│  ├─ settings.test.ts         # Encryption unavailable / write failure / recovery
 │  └─ ai-parse.test.ts         # AI polish request format and fallback
 ├─ scripts/
 │  ├─ test-mcp.ts              # MCP end-to-end test (stdio client → server.js)
@@ -118,270 +122,75 @@ ticknote/
 
 ## 3. Main process (`src/main/`)
 
-### 3.1 Startup order
+### 3.1 Startup and refresh
 
-`src/main/index.ts` is the only entry point. The startup flow is:
+`index.ts` sets the app name/AUMID, data directory and single-instance lock; copies legacy data, loads settings, opens the repo, injects IPC dependencies, creates windows/tray and registers the hotkey. `--autostart` stays in the tray; development runs do not register login items. The main window is 900×640, minimum 720×520; closing hides it and tray Quit exits.
 
-1. `app.setName('TickNote')`, and override `userData` with `TICKNOTE_DATA` (the legacy name `QUICKNOTE_DATA` is also accepted) to make test isolation easy.
-2. `app.setAppUserModelId('com.ticknote.app')` — this must match the AUMID used by the installer shortcuts, otherwise Windows toasts never show up.
-3. `requestSingleInstanceLock()`: exit if the lock cannot be acquired; a second launch wakes the existing main window via the `second-instance` event.
-4. `whenReady` → `bootstrap()`:
-   - remove the default menu (`Menu.setApplicationMenu(null)`);
-   - `migrateLegacyData(userData)`: run an idempotent migration once (same-directory `quicknote.db` → `ticknote.db`; legacy `%APPDATA%\QuickNote` directory → `%APPDATA%\TickNote`);
-   - read `settings.json` and apply `nativeTheme.themeSource`;
-   - for installed builds, write the launch-at-login entry on first start (guarded by `process.defaultApp !== true`, so dev mode never puts `electron.exe` into the startup entries);
-   - `openRepo(userData/ticknote.db)` → `setupIpc({repo, ...})` (`ipc.ts`) → `createMainWindow()` / `createCaptureWindow()` (`windows.ts`) → `createTray()` (`tray.ts`) → `registerHotkey()`;
-   - show the main window unless started with `--autostart`;
-   - `scanReminders('missed')` first to catch up on missed reminders, then start the 30-second polling loop.
-5. `before-quit` calls `markQuitting()` (`windows.ts`); `will-quit` clears timers, unregisters hotkeys and closes the database.
-6. `window-all-closed` is intentionally left empty: the tray stays resident, so closing every window does not quit the app.
+Missed reminders are scanned at startup, then every 30 seconds. Every 2 seconds `repo.dataVersion()` (`PRAGMA data_version`) detects writes from external connections such as MCP and broadcasts `items:changed`, refreshing counts too. A day change also triggers refresh. Quitting clears timers, hotkeys and the database. The renderer separately refreshes on window focus, including active search.
 
-`index.ts` only orchestrates; windows, tray, IPC and settings each live in `windows.ts`, `tray.ts`, `ipc.ts` and `settings.ts`, communicating through explicitly passed dependencies or exported getters to avoid circular imports.
+### 3.2 Windows, tray and reminders
 
-### 3.2 Windows
+- Popup: width 620, initial height 150; normally 242–298 after rendering. Main-process `capture:resize` clamps to 180–330. Opaque, frameless, always on top; drag position is remembered for this run and clamped to the display work area. Blur hiding is configurable; blur/×/hotkey preserve drafts, Esc explicitly discards.
+- Tray counts all open todos and pending reminders, rather than today's open todos.
+- Reminder scan: `remind_at <= now AND reminded_at IS NULL AND status='open'`. Mark before requesting the OS notification to avoid duplicates; the mark is not a delivery receipt. More than 3 are merged, as are missed startup reminders. Clicking selects the reminders filter and opens the item (the first item for a merged notification).
 
-|          | Main window                                                                       | Popup                                                                                                                                                                            |
-| -------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Size     | 900×640, minimum 720×520, resizable                                               | 620 wide, default height 150, clamped by the main process to 120–240                                                                                                             |
-| Look     | System title bar, background color follows the theme                              | `frame:false`, `alwaysOnTop`, `skipTaskbar`, `resizable:false`, with shadow                                                                                                      |
-| Close    | Intercept `close` → `hide()`; show a one-time “still running in the tray” balloon | Renderer `×` / `Esc` / `hide()` on blur                                                                                                                                          |
-| Position | System default                                                                    | First time: centered horizontally and slightly above on the display under the mouse cursor; after dragging it is remembered for the current run and clamped back into `workArea` |
+### 3.3 Settings, export and backup
 
-The popup does not use `transparent:true` (on Windows, transparent frameless windows dislocate the IME candidate box for Chinese input). Dragging is implemented in the renderer with `-webkit-app-region: drag`; the close button is `no-drag`. When the popup content changes, the renderer calls `capture:resize` to report its height and the main process clamps it.
+- `settings.ts` validates allowed fields, flushes a temporary file then renames it, and retains a valid prior `.bak` for recovery. Failed writes throw before committing new in-memory settings.
+- Keys use safeStorage. Saving a new key fails if encryption is unavailable. Legacy `plain:` values are encrypted on load or cleared if encryption is unavailable. The renderer receives only aiApiKeySet, never plaintext or ciphertext.
+- Markdown scopes: `all | todo | note | done | reminders | today`. Main-window export picks a directory; tray export uses the last/default location. Each run creates a timestamped directory with a random suffix; previous exports survive. Reminders include the full local date and time.
+- JSON backup uses system file dialogs and `{format:'ticknote-backup',version:1,exportedAt,items}`. It includes all Item fields, excluding settings, keys, unsubmitted drafts and internal ai_run_id. Restore validates the entire file (≤100 MB, ≤100000 items), then transactionally inserts missing IDs with exact timestamps. Existing IDs are never overwritten; other errors roll back. Daily automatic database backup is not implemented.
+- Uninstall opens only a program next to process.execPath; portable builds explain how to delete the extracted folder. User data is retained.
 
-### 3.3 Tray, hotkey, reminders
+### 3.4 IPC and AI
 
-- **Tray** (`src/main/tray.ts`): the icon is an embedded base64 PNG, so no runtime file is needed; left click shows the main window; the context menu contains “Open popup (shows the current hotkey) / Open main window / N unfinished today (disabled) / Export Markdown / Settings / Quit”. The tooltip shows today's unfinished count and the number of pending reminders.
-- **Hotkey**: `Control+Shift+Space` by default, stored in `settings.json`. On startup and on rebinding, `globalShortcut.unregisterAll()` is called before re-registering; on failure only `hotkeyRegistered=false` is set and a log line is written — the settings panel then shows that in red, with the tray entry as a fallback.
-- **Reminders**: every 30 seconds, `repo.dueReminders(now)` is called (`remind_at <= now AND reminded_at IS NULL AND status='open'`); `repo.markReminded()` writes to the database **first**, and the notification is shown **second**, so a restart never duplicates it; more than 3 items in the same round are merged into one notification; reminders missed while the app was not running are merged into “N reminders have expired”. Clicking the notification emits `items:focus`, and the main window focuses the record and opens the drawer.
+The complete channel table is in [DESIGN.md section 8](../DESIGN.md#8-ipc-契约); exact contracts are in shared/ipc.ts, shared/types.ts and preload/index.ts. Main validates input using zod. Most mutations broadcast changes; body edits and reminder changes are updated by the caller and refresh the tray.
 
-### 3.4 Settings, export, uninstall
+0.1.1 adds backup:export/import (`{path,count} | null`, null on cancel) and ai:test (string). items:restore-deleted serves both list and drawer undo. Stats return `{todayOpenTodos,openTodos,pendingReminders}`; list supports reminders and a composite cursor.
 
-- `settings.json` lives in `userData/settings.json`; all reads and writes go through `src/main/settings.ts`. Reads merge in defaults and distinguish `aiApiKeySet` (the only boolean exposed externally) from the internal `aiApiKeyEncrypted`; `applySettingsPatch()` accepts an `onHotkeyChange` callback, injected by the IPC layer to re-register the hotkey.
-- Export: `exportMarkdown(repo.allForExport(scope), userData/export)`, one file per creation date; scope is `all | todo | note | done | today`.
-- Uninstall: only available in packaged builds. It looks for `Uninstall TickNote.exe` next to `process.execPath` (also accepting the legacy `Uninstall QuickNote.exe`) and opens it with `shell.openPath`; dev mode returns `reason:'dev'`, the portable build returns `reason:'portable'`, and the renderer then tells the user to just delete the unzipped directory.
-
-### 3.5 IPC handlers
-
-`setupIpc(deps)` registers everything in one place in `src/main/ipc.ts`; the dependencies (repo, `notifyItemsChanged`, `refreshTray`, `focusItem`, `exportNow`, `registerHotkey`, `uninstallApp`) are injected from `index.ts` through `IpcDependencies` to avoid circular imports. Every handler validates its input with zod item by item (string length, uuid format, enum values). After a successful write, `deps.notifyItemsChanged()` is called (refresh the tray + send `items:changed` to the main window), and the renderer re-fetches the list on receipt.
-
-The full channel table is in [DESIGN.md section 8](../DESIGN.md#8-ipc-契约). Common channels:
-
-| Channel                                                | Direction              | Input → output                                              |
-| ------------------------------------------------------ | ---------------------- | ----------------------------------------------------------- |
-| `items:create`                                         | renderer → main        | `{content, kind}` → `Item`                                  |
-| `items:list`                                           | renderer → main        | `{filter, cursor?, limit?}` → `Item[]` (default 30, max 50) |
-| `items:search`                                         | renderer → main        | `{q, limit?}` → `Item[]`                                    |
-| `items:get`                                            | renderer → main        | `{id}` → `Item \| null`                                     |
-| `items:update`                                         | renderer → main        | `{id, content}` → `Item \| null`                            |
-| `items:set-kind`                                       | renderer → main        | `{id, kind}` → `Item \| null`                               |
-| `items:complete` / `items:restore`                     | renderer → main        | `{id}` → `Item \| null`                                     |
-| `items:set-reminder`                                   | renderer → main        | `{id, remindAt: number \| null}` → `Item \| null`           |
-| `items:delete`                                         | renderer → main        | `{id}` → `boolean`                                          |
-| `items:clear-all`                                      | renderer → main        | — → `number` (number of records deleted)                    |
-| `items:stats`                                          | renderer → main        | — → `{todayOpenTodos, pendingReminders}`                    |
-| `export:markdown`                                      | renderer → main        | `{scope}` → `{dir, files, count}`                           |
-| `settings:get` / `settings:set`                        | renderer → main        | — / `SettingsPatch` → `Settings`                            |
-| `autostart:get` / `autostart:set`                      | renderer → main        | — / `{enabled}` → `AutostartStatus`                         |
-| `ai:parse`                                             | renderer → main        | `{content}` → `{content, kind} \| null`                     |
-| `app:uninstall`                                        | renderer → main        | — → `UninstallResult`                                       |
-| `capture:hide` / `capture:resize` / `window:open-main` | renderer → main (send) | —                                                           |
-| `capture:shown`                                        | main → renderer        | Reset state and focus every time the popup is summoned      |
-| `items:changed`                                        | main → renderer        | Refresh the main window after a create/update/delete        |
-| `items:focus`                                          | main → renderer        | `{id}`, focus the record after clicking a notification      |
-| `settings:open`                                        | main → renderer        | Tray “Settings” opens the settings panel                    |
-
-### 3.6 Save flow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as User
-    participant C as capture.tsx
-    participant P as preload
-    participant M as main
-    participant R as repo.ts
-    participant D as SQLite
-    participant W as main.tsx
-
-    U->>M: Ctrl+Shift+Space (globalShortcut)
-    M->>M: position popup → show → focus
-    M-->>C: capture:shown (clear input, focus)
-    U->>C: type + Enter
-    C->>P: api.createItem({content, kind})
-    P->>M: invoke items:create
-    M->>M: zod validation
-    M->>R: repo.create(input)
-    R->>D: INSERT INTO items (FTS triggers stay in sync)
-    M-->>W: items:changed
-    M->>M: refresh tray counts
-    C->>P: api.hideCapture()
-    P->>M: send capture:hide
-    M->>M: captureWindow.hide()
-```
-
-Note: **writes from the MCP process do not trigger `items:changed`** (there is no cross-process event). The main window refreshes only on its own IPC writes, filter switches, or remounts.
-
----
+ai:parse sends the current input (≤2000 characters) only on user action, with a 3-second timeout and null on failure. ai:test uses saved settings, the fixed message “请回复 OK”, and a 10-second timeout; it sends no records. HTTP/model/key errors are shown in the UI.
 
 ## 4. Preload (`src/preload/index.ts`)
 
-It does exactly one thing: `contextBridge.exposeInMainWorld('api', api)`. What is exposed is an explicit allowlist of methods; the renderer never gets `ipcRenderer` and cannot name arbitrary channels.
-
-- Method names map one-to-one to channels: `createItem`, `listItems`, `searchItems`, `getItem`, `completeItem`, `restoreItem`, `updateItem`, `setItemKind`, `deleteItem`, `clearAllItems`, `setReminder`, `exportMarkdown`, `stats`, `getSettings`, `updateSettings`, `setTheme`, `getAutostart`, `setAutostart`, `aiParse`, `uninstallApp`, `hideCapture`, `resizeCapture`, `openMain`.
-- Event subscriptions return an unsubscribe function: `onCaptureShown`, `onItemsChanged`, `onItemsFocus`, `onOpenSettings`.
-- `export type Api = typeof api`; the renderer derives its full typing from this (`src/renderer/src/api.ts` imports that type).
-
----
+contextBridge exposes only named API methods, never ipcRenderer or arbitrary channels. onCaptureShown/onItemsChanged/onItemsFocus/onOpenSettings return unsubscribe functions. `Api = typeof api` keeps renderer and browser mock contracts consistent. New methods include exportBackup/importBackup/testAi.
 
 ## 5. Renderer (`src/renderer/`)
 
-- React 19 + `react-dom/client`, no router and no state library; window state uses `useState` / `useEffect`, and the only persistence is `localStorage` (collapsed groups, `ticknote.collapsedDays`).
-- The two HTML entries load `src/main.tsx` and `src/capture.tsx` respectively and share `styles.css`; the build is declared by `renderer.build.rollupOptions.input` in `electron.vite.config.ts`.
-- Views are split into components under `src/renderer/src/components/`: `TopBar` (search, `⋯` menu, settings entry), `ListItem` (row card), `Drawer` (detail drawer), `SettingsPanel` (settings panel), `ExportDialog` (export scope), `Toast` (lightweight toast); date grouping, time formatting and hotkey → accelerator conversion live in `src/renderer/src/utils.ts`.
-- `src/renderer/src/api.ts` uses the preload API directly when `window.api` exists; when it does not (static preview in a browser) it falls back to built-in mock data. If `navigator.userAgent` says Electron but `window.api` is missing, it throws immediately to report that the preload was not loaded.
-- Key main-window interactions:
-  - Search input is debounced 150ms before calling `items:search`; clearing the search falls back to `items:list`.
-  - Groups are computed from the creation date; group headers can be collapsed and that state is written to `localStorage`.
-  - Keyboard: `Ctrl+N` focuses the input; `↑`/`↓` move the selection, `Enter` opens the drawer; `Esc` exits in the order “export dialog → settings → search → drawer”.
-  - In the drawer you can edit the body (saved on blur), switch kind, set/clear a reminder, complete/restore, copy, delete with a two-step confirmation, and step to the previous/next record.
-  - The export dialog picks the scope (all / current filter / today only).
-- Key popup interactions: auto height (inner scrolling above 96px, with the total height reported to the main process), `Enter` submits (never while the IME is composing), `Esc` hides, `Shift+Enter` inserts a newline, leading spaces are dropped for 200ms (so a trailing hotkey keystroke never leaks in), the hint auto-hides after 900ms, and AI polish results can be echoed back and undone.
-
----
+- React 19, two HTML entries, shared styles and components. Missing preload in Electron fails immediately; a browser preview uses a mock.
+- hooks.ts implements drafts, readable errors and dialog focus. Main/popup drafts, per-item edit drafts, collapsed groups and drawer width use localStorage. Unsubmitted drafts are not in record backups.
+- Filters: all/todo/note/done/reminders. Reminders include open records with a reminder, including ones already marked reminded. Counts use all open todos. Data is grouped by creation date. Refresh reloads already-loaded pages and preserves the selected item separately; query generations reject stale results.
+- Search is debounced 150ms and spans all records independently of the list filter. At most 50 results, with a refinement hint at the limit. Mutations, external writes and focus refresh it.
+- Successful popup save clears the submitted draft and hides after about 450ms; reopening/editing cancels the old timer. A submission lock prevents duplicate Enter writes; composing IME Enter never submits; Shift+Enter inserts a newline.
+- AI requests bind to draft/session versions; obsolete results are ignored. Undo restores both original text and kind.
+- Drawer edits save on blur or Ctrl+Enter. Closing, navigation and kind/status changes wait for save; failure keeps the record open with retry. Header/footer remain visible while the body scrolls. At ≤780px the drawer overlays at about 420px; wider windows cap it at min(560px,50vw). Custom reminders require Apply and a future time. Copy uses the current draft and shows feedback.
+- List and drawer deletion share 5-second undo; MCP deletion and clear-all do not. Settings/export dialogs contain focus, restore prior focus, and expose labels and keyboard actions.
 
 ## 6. Shared contracts (`src/shared/`)
 
-| File                  | Contents                                                                                                                                                                                                                           |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/shared/ipc.ts`   | The `IPC` constant object, the single source of truth for every channel name; both main and preload reference it, string literals are forbidden                                                                                    |
-| `src/shared/types.ts` | `Item`, `ItemKind`, `ItemStatus`, `ItemSource`, `ListFilter`, `ListQuery`, `CreateItemInput`, `Settings`, `SettingsPatch`, `AutostartStatus`, `AiParseResult`, `ExportScope`, `ExportResult`, `UninstallResult`, `ThemePreference` |
+- ipc.ts: channel constants.
+- types.ts: Item, ItemCursor, ItemStats, Settings, BackupResult and other DTOs; CONTENT_LIMIT=2000.
+- validation.ts: versioned backup and Item schemas, reused for deletion restore.
 
-When adding or changing IPC, update these two files first, then main and preload, and finally the renderer — that way TypeScript points out every place that needs to be kept in sync at compile time.
-
----
+Contract changes must update main/preload/renderer/mock and pass typecheck.
 
 ## 7. Database
 
-### 7.1 Connection and location
-
-- Uses the `node:sqlite` built into Electron / Node (`DatabaseSync`): no third-party dependency and no native module compilation.
-- `openRepo()` does: `mkdirSync(dirname(dbPath))` → `new DatabaseSync(dbPath)` → `PRAGMA journal_mode = WAL` → `busy_timeout = 3000` → `synchronous = NORMAL` → migration.
-- Main-process database path: `join(app.getPath('userData'), 'ticknote.db')`, i.e. `%APPDATA%\TickNote\ticknote.db` (`TICKNOTE_DATA` can change `userData`).
-- The MCP process resolves the path itself, in this order: `TICKNOTE_DB` → `ticknote.db` under `TICKNOTE_DATA` (legacy `QUICKNOTE_DATA` accepted; the old `quicknote.db` is used if that is all there is) → `%APPDATA%\TickNote\ticknote.db` → the legacy file name in the same directory → `%APPDATA%\QuickNote\quicknote.db` → `~/.ticknote/ticknote.db`.
-- The main process also runs an idempotent migration at startup, copying the legacy file name / directory to `%APPDATA%\TickNote\ticknote.db`.
-
-### 7.2 Schema and indexes
-
-The DDL in `src/main/db/schema.ts` (excerpt):
-
-```sql
-CREATE TABLE IF NOT EXISTS items (
-  id           TEXT PRIMARY KEY,
-  content      TEXT NOT NULL,
-  kind         TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note','todo')),
-  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
-  remind_at    INTEGER,
-  reminded_at  INTEGER,
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL,
-  completed_at INTEGER,
-  source       TEXT NOT NULL DEFAULT 'human' CHECK (source IN ('human','ai')),
-  ai_run_id    TEXT
-);
-
-CREATE INDEX idx_items_created ON items(created_at);
-CREATE INDEX idx_items_remind  ON items(remind_at) WHERE remind_at IS NOT NULL;
-CREATE INDEX idx_items_status  ON items(status, created_at);
-```
-
-- All times are stored as UTC milliseconds and converted to the local time zone for display; grouping only uses `created_at`, `remind_at` never affects ordering.
-- `ai_run_id` is written by the MCP `create_item` tool (one UUID per call) and identifies an AI write batch.
-
-### 7.3 Full-text search
-
-```sql
-CREATE VIRTUAL TABLE items_fts USING fts5(
-  content, content='items', content_rowid='rowid', tokenize='trigram'
-);
-```
-
-Three `AFTER INSERT / AFTER DELETE / AFTER UPDATE` triggers keep the index in sync. The rules in `repo.search()`:
-
-- Query string ≥ 3 characters: use `items_fts MATCH`; FTS syntax characters are stripped first and the rest is matched as a phrase, falling back to `LIKE` if that throws.
-- Query string < 3 characters: plain `LIKE '%q%'` (the data set is small, so this is good enough).
-
-`trigram` is what makes Chinese searchable — the default tokenizer is essentially useless for Chinese.
-
-### 7.4 Migrations
-
-`migrate()` reads `PRAGMA user_version`; when it is lower than `SCHEMA_VERSION` (currently `1`) it runs the DDL and writes the new version number inside one transaction. When upgrading the schema, **append** a migration branch and bump `SCHEMA_VERSION`; never edit DDL that has already shipped.
-
-### 7.5 Repo interface
-
-The `Repo` interface (`src/main/db/repo.ts`) contains: `create`, `list`, `listRange`, `search`, `get`, `setStatus`, `updateContent`, `update`, `remove`, `clearAll`, `setReminder`, `dueReminders`, `markReminded`, `allForExport`, `stats`, `close`.
-
-A few easily-missed rules:
-
-- `setReminder` / `update({remindAt})` must also set `reminded_at` to NULL, otherwise moving a reminder into the future would never fire again.
-- `update({status:'done'})` writes `completed_at` at the same time; switching back to `open` clears it.
-- Completing an item does not change its position: the list is always sorted by `created_at` descending, and completed items are distinguished by styling.
-- `remove` is a hard delete (no recycle bin); `clearAll` returns the number of records deleted.
-
----
+- repo.ts is the data access layer; schema.ts DDL is bundled. Built-in node:sqlite, WAL, busy_timeout=3000, synchronous=NORMAL. Schema version remains 1, compatible with 0.1.0. There is no additional application-level “retry once” policy.
+- UTC milliseconds; order `(created_at DESC,id DESC)`, cursor `{createdAt,id}` works even when the boundary item is deleted. Numeric cursors are legacy compatibility. Completion/reminders do not move creation-date groups.
+- FTS5 trigram: ≥3 characters use a quoted phrase with escaped quotes, preserving paths, URLs and parentheses. Short queries use escaped LIKE, including literal %/_/backslash. Triggers sync inserts/updates/deletes.
+- Changing reminders clears reminded_at; completion sets completed_at and restoring clears it. MCP validates reminder time before a single create INSERT, so invalid times leave no partial record.
+- Repo exposes create/list/listRange/search/get/setStatus/updateContent/update/remove/restore/clearAll/importItems/setReminder/dueReminders/markReminded/allForExport/stats/dataVersion/close and db. importItems transactionally merges missing IDs, skips only ID conflicts, and rolls back other errors.
+- Schema changes append migrations and increment SCHEMA_VERSION; never alter shipped DDL.
 
 ## 8. Security model
 
-| Item                | Current state                                                                                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `contextIsolation`  | **On**: the renderer cannot reach Node / Electron internals                                                                                                   |
-| `nodeIntegration`   | **Off**                                                                                                                                                       |
-| `sandbox`           | **On** (both windows set `sandbox: true`; the preload only uses `contextBridge` + `ipcRenderer`, so it needs no Node)                                         |
-| Renderer origin     | Only local files (`loadFile`) or `ELECTRON_RENDERER_URL` in dev; `hardenWindow()` denies new windows and blocks `will-navigate`                               |
-| CSP                 | Both HTML entries carry a minimal CSP meta tag (see below)                                                                                                    |
-| IPC input           | zod validation on the main side (length, uuid, enums); the renderer is never trusted                                                                          |
-| Renderer capability | Only the `window.api` allowlist; channel names come from `shared/ipc.ts` and cannot be customized                                                             |
-| AI key              | `safeStorage.encryptString()` then base64 into `aiApiKeyEncrypted` in `settings.json`; the renderer can only read the `aiApiKeySet` boolean                   |
-| AI key fallback     | When `safeStorage.isEncryptionAvailable()` is false, write a `plain:<base64>` prefix (explicitly marked as unencrypted) instead of pretending it is encrypted |
-| Database            | Opened only by the main / MCP processes; WAL + `busy_timeout` support concurrency                                                                             |
-| Single instance     | `requestSingleInstanceLock`, so two instances never write the database at the same time                                                                       |
-| Uninstall           | Only opens the uninstaller inside the install directory, resolved next to `process.execPath`; never accepts a path from the renderer                          |
-| MCP delete          | `delete_item` is not registered by default; even when enabled it requires `confirm: true` for the hard delete                                                 |
-| Menu                | `Menu.setApplicationMenu(null)`: no default menu and no developer shortcut entry points                                                                       |
-
-`hardenWindow()` in `src/main/windows.ts` applies two things to both windows:
-
-```ts
-win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-win.webContents.on('will-navigate', (event) => event.preventDefault());
-```
-
-The CSP is written into `<meta http-equiv="Content-Security-Policy">` in `src/renderer/main.html` and `src/renderer/capture.html`:
-
-```
-default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
-img-src 'self' data:; font-src 'self'; connect-src 'self' ws:;
-object-src 'none'; base-uri 'none'; form-action 'none'
-```
-
-- `connect-src 'self' ws:` is there for Vite HMR during development; production builds never make network requests (AI calls are issued from the main process and are not subject to the renderer CSP).
-- `'unsafe-inline'` is a trade-off kept for Vite injection and inline component styles; if you later want to tighten it, evaluate removing it and handle inline styles at build time.
-
----
+Both windows use contextIsolation=true, nodeIntegration=false and sandbox=true. hardenWindow rejects new windows and navigation. CSP restricts local resources while retaining development ws and inline styles. Only explicit user actions initiate main-process AI requests. Database, drafts and exports are local plaintext; keys use OS encryption. IPC uses named methods and zod validation. MCP deletion is disabled by default and requires confirm=true. No cloud server, telemetry, auto-update or background networking.
 
 ## 9. MCP process model
 
-- `src/mcp/server.ts` only uses `McpServer` + `StdioServerTransport` from `@modelcontextprotocol/sdk`, composed with `repo.ts`. It **does not load** any window / tray / Electron UI modules, so it runs without the app.
-- Build: `npm run build:mcp` bundles it with esbuild into a single CJS file `resources/mcp/server.js` (SDK and repo are inlined); that file is in `.gitignore` and is not committed.
-- Packaging: `extraResources` in `electron-builder.yml` copies `resources/mcp` into the install directory's `resources\mcp`, **not packed into the asar**, so external processes can execute it.
-- Launch: the AI client uses the `TickNote.exe` from the install directory and runs `server.js` in Node mode through the `ELECTRON_RUN_AS_NODE=1` environment variable; users do not need to install Node separately.
-- Delete switch: at startup the process reads the `settings.json` **in the same directory as the database** and registers `delete_item` only when `mcpDeleteEnabled === true`. Because each client spawns its own MCP process, the client must be restarted after changing the switch.
-- Concurrency: the same WAL + `busy_timeout=3000` as the main process; a single call writes at most one record, and conflicts rely on SQLite's busy-wait retry.
-- Limits: `limit ≤ 50`, `content ≤ 2000` characters, and `update_item` returns error text instead of throwing when the ISO time is invalid.
+An independent stdio process uses only the SDK and repo, without UI modules. esbuild produces resources/mcp/server.js, copied outside asar with extraResources. Clients launch TickNote.exe with ELECTRON_RUN_AS_NODE=1; no separate Node installation is needed and the app can be closed.
 
-See [MCP.en.md](MCP.en.md) for details.
-
----
+Path resolution prefers TICKNOTE_DB, then TICKNOTE_DATA (legacy QUICKNOTE_DATA accepted), then default AppData and legacy fallbacks. The delete switch comes from settings.json beside the database and requires restarting the client. Five tools by default, six with deletion; limit≤50, content≤2000. AI source and ai_run_id are written, but batch undo is not implemented. MCP does not deliver reminders; the running app does. See [MCP.en.md](MCP.en.md) for client setup.
 
 ## 10. Extension guide
 
@@ -416,11 +225,11 @@ Checkpoints: `npm run typecheck` must pass; new channel names must not be writte
 
 ---
 
-## 11. Known limitations (by design)
+## 11. Known limitations
 
-- **Windows only**: the tray, toasts and the NSIS installer are all Windows implementations; there are no macOS / Linux branches.
-- **No real-time cross-process notifications**: the main window does not refresh automatically after MCP writes (see 3.6).
-- **No recycle bin**: deletion cannot be undone, there is only a two-step confirmation.
-- **No cloud sync / accounts / rich text**: the single database file is the only source of truth, with Markdown export as the safety net.
-- **AI only polishes**: it does not parse dates and never writes to the database automatically; on failure the original text is kept.
-- **Unsigned**: build artifacts are not code-signed, so SmartScreen warns about an unknown publisher.
+- Windows only; no cloud sync, accounts, rich text or background networking.
+- MCP refresh uses polling with about a 2-second delay, not real-time push.
+- GUI single-item deletion has 5-second undo, no persistent recycle bin; MCP deletion and clear-all do not use this undo.
+- Daily automatic database backup and AI batch undo are not implemented. Manual JSON record backup is available.
+- OS settings affect notifications; a reminded mark is not proof of delivery. AI only polishes; it does not parse dates or automatically create records.
+- Builds are unsigned. Installation, autostart, notification delivery, IME and multiple displays still need manual verification; see the [Chinese validation guide](VALIDATION-0.1.1.md).

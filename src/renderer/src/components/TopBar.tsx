@@ -11,7 +11,14 @@ export interface TopBarProps {
   onOpenSettings: () => void;
 }
 
-export function TopBar({ query, onQueryChange, theme, onChangeTheme, onOpenExport, onOpenSettings }: TopBarProps) {
+export function TopBar({
+  query,
+  onQueryChange,
+  theme,
+  onChangeTheme,
+  onOpenExport,
+  onOpenSettings,
+}: TopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -38,6 +45,8 @@ export function TopBar({ query, onQueryChange, theme, onChangeTheme, onOpenExpor
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder="搜索全部记录"
+          aria-label="搜索全部记录"
+          maxLength={200}
           spellCheck={false}
         />
       </div>
@@ -47,6 +56,7 @@ export function TopBar({ query, onQueryChange, theme, onChangeTheme, onOpenExpor
           className="chip"
           title="更多"
           aria-label="更多操作"
+          aria-expanded={menuOpen}
           onClick={() => setMenuOpen((value) => !value)}
         >
           ⋯
@@ -68,12 +78,13 @@ export function TopBar({ query, onQueryChange, theme, onChangeTheme, onOpenExpor
               导出 Markdown
             </button>
             <div className="menu-label">外观</div>
-            <div className="menu-themes">
+            <div className="menu-themes" role="group" aria-label="外观">
               {THEMES.map((entry) => (
                 <button
                   key={entry.key}
                   type="button"
                   className={`chip${theme === entry.key ? ' on' : ''}`}
+                  aria-pressed={theme === entry.key}
                   title={entry.title}
                   onClick={() => {
                     setMenuOpen(false);

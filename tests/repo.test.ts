@@ -24,7 +24,8 @@ test('repo：增删改查、分页、提醒、类型切换、清空', async () =
 
     const all = repo.list({ filter: 'all', limit: 30 });
     assert.equal(all.length, 2);
-    assert.equal(all[0].id, todo.id, '新记录应排在最前');
+    const expectedFirst = todo.createdAt === note.createdAt ? [todo.id, note.id].sort().at(-1) : todo.id;
+    assert.equal(all[0].id, expectedFirst, '按创建时间和 id 稳定倒序排列');
 
     assert.equal(repo.list({ filter: 'todo', limit: 30 }).length, 1);
     assert.equal(repo.list({ filter: 'note', limit: 30 }).length, 1);
@@ -52,7 +53,8 @@ test('repo：增删改查、分页、提醒、类型切换、清空', async () =
 
     const page1 = repo.list({ filter: 'all', limit: 30 });
     assert.equal(page1.length, 30);
-    const page2 = repo.list({ filter: 'all', limit: 30, cursor: page1[page1.length - 1].createdAt });
+    const last = page1[page1.length - 1];
+    const page2 = repo.list({ filter: 'all', limit: 30, cursor: { createdAt: last.createdAt, id: last.id } });
     assert.equal(page2.length, 27);
     const ids = new Set([...page1, ...page2].map((i) => i.id));
     assert.equal(ids.size, 57, '分页结果不应重复');
@@ -70,8 +72,14 @@ test('repo：增删改查、分页、提醒、类型切换、清空', async () =
     assert.equal(toNote?.kind, 'note');
     assert.equal(toNote?.status, 'open');
     assert.equal(toNote?.createdAt, kindItem.createdAt);
-    assert.equal(repo.list({ filter: 'note' }).some((item) => item.id === kindItem.id), true);
-    assert.equal(repo.list({ filter: 'todo' }).some((item) => item.id === kindItem.id), false);
+    assert.equal(
+      repo.list({ filter: 'note' }).some((item) => item.id === kindItem.id),
+      true,
+    );
+    assert.equal(
+      repo.list({ filter: 'todo' }).some((item) => item.id === kindItem.id),
+      false,
+    );
     assert.equal(repo.update(kindItem.id, { kind: 'todo' })?.kind, 'todo');
     assert.equal(repo.search('类型切换').length, 1, '切换类型不应影响 FTS');
 

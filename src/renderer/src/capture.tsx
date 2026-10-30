@@ -1,124 +1,138 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import type { ItemKind } from '../../shared/types';
+import { CONTENT_LIMIT, type ItemKind } from '../../shared/types';
 import { api } from './api';
+import { errorMessage, useDraft } from './hooks';
+import { KINDS } from './utils';
 import './styles.css';
 
-const KINDS: Array<{ key: ItemKind; label: string }> = [
-  { key: 'todo', label: '待办' },
-  { key: 'note', label: '便签' },
-];
-
-const pad = (value: number) => String(value).padStart(2, '0');
-
 function Capture() {
-  const [value, setValue] = useState('');
-  const [kind, setKind] = useState<ItemKind>('todo');
+  const draft = useDraft('ticknote.draft.capture');
   const [toast, setToast] = useState('');
   const [aiEnabled, setAiEnabled] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
-  const [aiUndo, setAiUndo] = useState<{ content: string; kind: ItemKind } | null>(null);
-  const [aiFailed, setAiFailed] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [aiUndo, setAiUndo] = useState<{ text: string; kind: ItemKind } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hideTimer = useRef<number | null>(null);
   const shownAt = useRef(Date.now());
-
-  const refreshAiEnabled = () => {
-    void api.getSettings().then((settings) => setAiEnabled(settings.aiEnabled));
-  };
+  const submitLock = useRef(false);
+  const aiLock = useRef(false);
+  const cancelHide = useCallback(() => {
+    if (hideTimer.current !== null) window.clearTimeout(hideTimer.current);
+    hideTimer.current = null;
+  }, []);
+  const cancel = useCallback(() => {
+    cancelHide();
+    draft.change('');
+    setAiUndo(null);
+    setToast('');
+    api.hideCapture();
+  }, [cancelHide, draft.change]);
 
   useEffect(() => {
-    const unsubscribe = api.onCaptureShown(() => {
+    const refresh = () => {
+      cancelHide();
       shownAt.current = Date.now();
-      setValue('');
-      setKind('todo');
+      draft.version.current++;
       setToast('');
-      setAiUndo(null);
-      setAiFailed(false);
-      refreshAiEnabled();
+      void api
+        .getSettings()
+        .then((value) => setAiEnabled(value.aiEnabled))
+        .catch(() => setAiEnabled(false));
       requestAnimationFrame(() => textareaRef.current?.focus());
-    });
-    refreshAiEnabled();
-    requestAnimationFrame(() => textareaRef.current?.focus());
-    return unsubscribe;
-  }, []);
+    };
+    const unsubscribe = api.onCaptureShown(refresh);
+    const onBlur = () => {
+      draft.version.current++;
+      cancelHide();
+    };
+    window.addEventListener('blur', onBlur);
+    refresh();
+    return () => {
+      unsubscribe();
+      cancelHide();
+      window.removeEventListener('blur', onBlur);
+    };
+  }, [cancelHide, draft.version]);
 
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    textarea.style.height = 'auto';
+    textarea.style.height = '0px';
     const next = Math.min(textarea.scrollHeight, 96);
     textarea.style.height = `${next}px`;
-    // 16(页面 padding) + 24(卡片 padding) + 18(拖动条) + 16(两处 gap) + 24(foot) + 22(输入框 padding/边框)
-    api.resizeCapture(120 + next);
-  }, [value]);
+    api.resizeCapture(202 + next);
+  }, [draft.text]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') api.hideCapture();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.isComposing) {
+        event.preventDefault();
+        cancel();
+      }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
-
-  const finish = () => {
-    setValue('');
-    setAiUndo(null);
-    setAiFailed(false);
-    const now = new Date();
-    setToast(`已记录 ${pad(now.getHours())}:${pad(now.getMinutes())}`);
-    if (hideTimer.current) window.clearTimeout(hideTimer.current);
-    hideTimer.current = window.setTimeout(() => {
-      setToast('');
-      api.hideCapture();
-      hideTimer.current = null;
-    }, 900);
-  };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [cancel]);
 
   const submit = async () => {
-    const content = value.trim();
-    if (!content) return;
-    await api.createItem({ content, kind });
-    finish();
-  };
-
-  // AI 只负责润色并回显，用户按 Enter 才真正记录；保留原文可撤销
-  const runAi = async () => {
-    const content = value.trim();
-    if (!content || aiBusy) return;
-    setAiBusy(true);
+    const content = draft.text.trim();
+    if (!content || submitLock.current) return;
+    if (content.length > CONTENT_LIMIT) {
+      setToast(`最多 ${CONTENT_LIMIT} 字，请缩短内容`);
+      return;
+    }
+    submitLock.current = true;
+    setSending(true);
+    cancelHide();
+    const version = ++draft.version.current;
+    const submittedKind = draft.kind;
     try {
-      const result = await api.aiParse(content);
-      if (result) {
-        setAiUndo({ content, kind });
-        setAiFailed(false);
-        setValue(result.content);
-        setKind(result.kind);
-        setToast('AI 已润色 · Enter 保存');
-      } else {
-        setAiFailed(true);
-        setToast('AI 润色失败，已保留原文');
-      }
-      requestAnimationFrame(() => textareaRef.current?.focus());
+      await api.createItem({ content, kind: submittedKind });
+      if (draft.version.current === version) {
+        draft.change('');
+        setAiUndo(null);
+        setToast('已记录');
+        const savedVersion = draft.version.current;
+        hideTimer.current = window.setTimeout(() => {
+          if (draft.version.current === savedVersion) api.hideCapture();
+          hideTimer.current = null;
+        }, 450);
+      } else setToast('上一条已记录，当前草稿已保留');
+    } catch (error) {
+      setToast(errorMessage(error, '记录失败，草稿已保留，请重试'));
     } finally {
-      setAiBusy(false);
+      submitLock.current = false;
+      setSending(false);
     }
   };
 
-  const undoAi = () => {
-    if (!aiUndo) return;
-    setValue(aiUndo.content);
-    setKind(aiUndo.kind);
-    setAiUndo(null);
-    setAiFailed(false);
-    setToast('已撤销润色');
-    requestAnimationFrame(() => textareaRef.current?.focus());
+  const runAi = async () => {
+    if (!draft.text.trim() || aiLock.current || draft.text.length > CONTENT_LIMIT) return;
+    aiLock.current = true;
+    setAiBusy(true);
+    const version = draft.version.current;
+    const original = { ...draft.current.current };
+    try {
+      const result = await api.aiParse(original.text.trim());
+      if (draft.version.current !== version) return;
+      if (result) {
+        draft.change(result.content, result.kind);
+        setAiUndo(original);
+        setToast('AI 已润色 · Enter 记录');
+      } else setToast('润色失败，原文已保留，可重试');
+    } catch (error) {
+      if (draft.version.current === version) setToast(errorMessage(error, '润色失败，原文已保留'));
+    } finally {
+      aiLock.current = false;
+      setAiBusy(false);
+    }
   };
 
   return (
     <div className="capture-body">
       <div className="capture">
-        {/* 无边框窗口的拖动条；除关闭按钮外都可拖动 */}
         <div className="capture-drag">
           <span className="capture-grip" aria-hidden="true">
             ⠿
@@ -126,9 +140,13 @@ function Capture() {
           <button
             type="button"
             className="capture-close"
-            aria-label="关闭浮窗"
-            title="关闭（Esc）"
-            onClick={() => api.hideCapture()}
+            aria-label="收起并保留草稿"
+            title="收起并保留草稿"
+            onClick={() => {
+              cancelHide();
+              draft.version.current++;
+              api.hideCapture();
+            }}
           >
             ×
           </button>
@@ -136,16 +154,26 @@ function Capture() {
         <div className="capture-box">
           <textarea
             ref={textareaRef}
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
+            value={draft.text}
+            aria-label="速记内容"
+            maxLength={CONTENT_LIMIT}
+            onChange={(event) => {
+              cancelHide();
+              draft.changeText(event.target.value);
+              setToast('');
+              setAiUndo(null);
+            }}
             onKeyDown={(event) => {
-              // 热键的最后一个空格可能漏进刚聚焦的输入框，前 200ms 内丢弃
               if (event.key === ' ' && Date.now() - shownAt.current < 200) {
                 event.preventDefault();
                 return;
               }
-              if (event.key === 'Enter' && !event.shiftKey) {
-                if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+              if (
+                event.key === 'Enter' &&
+                !event.shiftKey &&
+                !event.nativeEvent.isComposing &&
+                event.keyCode !== 229
+              ) {
                 event.preventDefault();
                 void submit();
               }
@@ -160,35 +188,58 @@ function Capture() {
               <button
                 key={entry.key}
                 type="button"
-                className={`chip${kind === entry.key ? ' on' : ''}`}
-                onClick={() => setKind(entry.key)}
+                className={`chip${draft.kind === entry.key ? ' on' : ''}`}
+                aria-pressed={draft.kind === entry.key}
+                onClick={() => {
+                  cancelHide();
+                  draft.changeKind(entry.key);
+                }}
               >
                 {entry.label}
               </button>
             ))}
-            {aiEnabled ? (
+            {aiEnabled && (
               <button
                 type="button"
                 className="chip ai-chip"
-                disabled={aiBusy || !value.trim()}
-                title="用 AI 润色措辞并判定类型；失败时保留原文"
+                disabled={aiBusy || sending || !draft.text.trim()}
+                aria-busy={aiBusy}
                 onClick={() => void runAi()}
               >
-                {aiBusy ? '润色中…' : aiFailed ? '重试润色' : 'AI 润色'}
+                {aiBusy ? '润色中…' : 'AI 润色'}
               </button>
-            ) : null}
-            {aiUndo ? (
-              <button type="button" className="chip" onClick={undoAi}>
+            )}
+            {aiUndo && (
+              <button
+                type="button"
+                className="chip"
+                onClick={() => {
+                  draft.change(aiUndo.text, aiUndo.kind);
+                  setAiUndo(null);
+                  setToast('已撤销润色');
+                }}
+              >
                 撤销润色
               </button>
-            ) : null}
+            )}
           </div>
-          <span className="capture-hint">Enter 记录 · Esc 取消</span>
+          <button
+            type="button"
+            className="send"
+            disabled={sending || !draft.text.trim()}
+            onClick={() => void submit()}
+          >
+            {sending ? '记录中…' : '记录'}
+          </button>
         </div>
-        {toast ? <span className="capture-toast">{toast}</span> : null}
+        <div className="capture-status" role="status">
+          {toast ||
+            (draft.storageFailed
+              ? '草稿暂未备份，请及时记录'
+              : `Enter 记录 · Shift+Enter 换行 · Esc 丢弃草稿 · ${draft.text.length}/${CONTENT_LIMIT}`)}
+        </div>
       </div>
     </div>
   );
 }
-
 createRoot(document.getElementById('root')!).render(<Capture />);

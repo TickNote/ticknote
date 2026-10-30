@@ -10,20 +10,25 @@ const TRAY_ICON =
 
 let tray: Tray | null = null;
 let repoRef: Repo | null = null;
-let exportNowRef: ((scope?: ExportScope, interactive?: boolean) => Promise<ExportResult | null>) | null = null;
+let exportNowRef: ((scope?: ExportScope, interactive?: boolean) => Promise<ExportResult | null>) | null =
+  null;
 let openSettingsRef: (() => void) | null = null;
 
 function buildTrayMenu(): Menu {
   const settings = getSettings();
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const stats = repoRef?.stats(todayStart.getTime()) ?? { todayOpenTodos: 0, pendingReminders: 0 };
+  const stats = repoRef?.stats(todayStart.getTime()) ?? {
+    todayOpenTodos: 0,
+    openTodos: 0,
+    pendingReminders: 0,
+  };
 
   return Menu.buildFromTemplate([
     { label: '打开浮窗', accelerator: settings.hotkey, click: toggleCapture },
     { label: '打开主窗', click: showMainWindow },
     { type: 'separator' },
-    { label: `今天未完成 ${stats.todayOpenTodos} 条`, enabled: false },
+    { label: `未完成共 ${stats.openTodos} 条`, enabled: false },
     { label: '导出 Markdown', click: exportFromTray },
     { label: '设置', click: () => openSettingsRef?.() },
     { type: 'separator' },
@@ -52,8 +57,12 @@ export function refreshTray(): void {
   tray.setContextMenu(buildTrayMenu());
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const stats = repoRef?.stats(todayStart.getTime()) ?? { todayOpenTodos: 0, pendingReminders: 0 };
-  tray.setToolTip(`待办便签 · 今天未完成 ${stats.todayOpenTodos} 条 · 待提醒 ${stats.pendingReminders} 条`);
+  const stats = repoRef?.stats(todayStart.getTime()) ?? {
+    todayOpenTodos: 0,
+    openTodos: 0,
+    pendingReminders: 0,
+  };
+  tray.setToolTip(`待办便签 · 未完成共 ${stats.openTodos} 条 · 待提醒 ${stats.pendingReminders} 条`);
 }
 
 export function createTray(options: {

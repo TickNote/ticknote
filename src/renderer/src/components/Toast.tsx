@@ -11,7 +11,7 @@ export interface ToastProps {
 export function Toast({ text, action }: ToastProps) {
   if (!text) return null;
   return (
-    <div className={`toast${action ? ' action' : ''}`}>
+    <div className={`toast${action ? ' action' : ''}`} role="status" aria-live="polite" aria-atomic="true">
       {text}
       {action ? (
         <button type="button" className="toast-action" onClick={action.onClick}>

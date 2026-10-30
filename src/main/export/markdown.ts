@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ExportResult, Item } from '../../shared/types';
 
@@ -19,12 +19,19 @@ function toLine(item: Item): string {
   const mark = item.kind === 'todo' ? `- [${item.status === 'done' ? 'x' : ' '}]` : '-';
   // 多行内容续行缩进两格，避免打断 Markdown 列表
   const content = item.content.replace(/\r\n/g, '\n').replace(/\n/g, '\n  ');
-  const remind = item.remindAt ? ` · 提醒 ${timeKey(item.remindAt)}` : '';
+  const remind = item.remindAt ? ` · 提醒 ${dateKey(item.remindAt)} ${timeKey(item.remindAt)}` : '';
   return `${mark} ${content}${remind}`;
 }
 
 export function exportMarkdown(items: Item[], exportDir: string): ExportResult {
   mkdirSync(exportDir, { recursive: true });
+  const now = new Date();
+  const outputDir = mkdtempSync(
+    join(
+      exportDir,
+      `TickNote-${dateKey(now.getTime())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}-`,
+    ),
+  );
 
   const groups = new Map<string, Item[]>();
   for (const item of items) {
@@ -38,10 +45,10 @@ export function exportMarkdown(items: Item[], exportDir: string): ExportResult {
   for (const [date, bucket] of groups) {
     const lines = [`# ${date}`, ''];
     for (const item of bucket) lines.push(toLine(item));
-    const file = join(exportDir, `notes-${date}.md`);
+    const file = join(outputDir, `notes-${date}.md`);
     writeFileSync(file, `${lines.join('\n')}\n`, 'utf8');
     files.push(file);
   }
 
-  return { dir: exportDir, files, count: items.length };
+  return { dir: outputDir, files, count: items.length };
 }

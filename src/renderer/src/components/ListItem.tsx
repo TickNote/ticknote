@@ -1,6 +1,6 @@
 import type { MouseEvent, ReactNode } from 'react';
 import type { Item } from '../../../shared/types';
-import { formatRemindTag, formatTime } from '../utils';
+import { formatRemindTag, formatTime, reminderStatus } from '../utils';
 
 export interface ListItemProps {
   item: Item;
@@ -52,13 +52,25 @@ export function ListItem({
   return (
     <div
       className={`row${selected ? ' selected' : ''}${cursor ? ' cursor' : ''}${highlight ? ' highlight' : ''}`}
+      data-item-id={item.id}
+      role="group"
+      aria-label={`${item.kind === 'todo' ? '待办' : '便签'}：${item.content}`}
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          event.stopPropagation();
+          onClick();
+        }
+      }}
     >
       {item.kind === 'todo' ? (
         <input
           type="checkbox"
           className="check"
           checked={item.status === 'done'}
+          aria-label={`${item.status === 'done' ? '取消完成' : '完成'}：${item.content}`}
           onChange={() => void 0}
           onClick={(event) => onToggleStatus(event)}
         />
@@ -70,7 +82,9 @@ export function ListItem({
           </svg>
         </span>
       )}
-      <span className={`text${item.status === 'done' ? ' done' : ''}`}>{renderText(item.content, query)}</span>
+      <span className={`text${item.status === 'done' ? ' done' : ''}`}>
+        {renderText(item.content, query)}
+      </span>
       {item.source === 'ai' ? <span className="tag">AI</span> : null}
       {item.remindAt ? (
         <span
@@ -83,7 +97,7 @@ export function ListItem({
               : undefined
           }
         >
-          {formatRemindTag(item.remindAt)}
+          {`${reminderStatus(item)} · ${formatRemindTag(item.remindAt).replace(/^提醒 /, '')}`}
         </span>
       ) : null}
       <span className="time">{formatTime(item.createdAt)}</span>

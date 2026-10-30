@@ -1,6 +1,8 @@
-# TickNote（待办便签）设计文档（v1.12）
+# TickNote（待办便签）设计文档（v1.13 · 对应应用 0.1.1）
 
-> 状态：设计已确认 · Electron / SQLite / MCP stdio
+> 状态：当前规格已与 0.1.1 代码核对 · Electron / SQLite / MCP stdio
+> 0.1.1 修订：草稿恢复与异步防覆盖、复合分页和字面搜索、跨进程写入刷新、独立导出目录、JSON 备份合并恢复、统一删除撤销、提醒筛选与显式应用、AI 连接测试与设置安全持久化；界面细节同时修正输入区重复焦点框、外观菜单换行、AI 润色按钮常驻高亮。
+> 范围：第 1–12、14 节描述当前功能；第 13、15、16 节保留历史记录，历史验收不代表本版本全部实机验证通过。每日自动数据库备份、按 AI 批次撤销尚未实现。
 > 产品定位：记录内容与创建时间，不做任务调度。
 
 ## 1. 目标
@@ -46,7 +48,7 @@
 
 | 层次 | 选型 | 说明 |
 |---|---|---|
-| 桌面壳 | Electron（最新稳定版，锁定版本） | 生态成熟、坑少；代价是包体和常驻内存 |
+| 桌面壳 | Electron（package-lock.json 固定安装解析版本） | 生态成熟、坑少；代价是包体和常驻内存 |
 | 构建 | electron-vite + electron-builder | 开发热更新 + NSIS 安装包 |
 | 前端 | React + TypeScript | 两个窗口共用组件 |
 | 存储 | Electron 内置 `node:sqlite` + WAL + FTS5 | 无原生编译依赖，多进程安全；本机无 MSVC，改用内置 SQLite |
@@ -72,7 +74,7 @@ ticknote/
 │  │  ├─ db/
 │  │  │  ├─ schema.ts        DDL 与版本号（随包编译）
 │  │  │  └─ repo.ts          items 的唯一数据访问层
-│  │  ├─ ai/parse.ts         可选：单行文本润色
+│  │  ├─ ai/parse.ts         可选：当前输入文本润色
 │  │  └─ export/markdown.ts  导出
 │  ├─ mcp/server.ts          stdio MCP 入口（独立进程）
 │  ├─ preload/index.ts       contextBridge 白名单 API
@@ -105,13 +107,13 @@ CREATE TABLE items (
   status       TEXT NOT NULL DEFAULT 'open'
                CHECK (status IN ('open','done')),
   remind_at    INTEGER,                       -- UTC 毫秒；可选提醒，NULL 表示不提醒
-  reminded_at  INTEGER,                       -- 已弹过提醒的时间，防重复
+  reminded_at  INTEGER,                       -- 请求通知前的处理标记，防重复；非送达回执
   created_at   INTEGER NOT NULL,
   updated_at   INTEGER NOT NULL,
   completed_at INTEGER,
   source       TEXT NOT NULL DEFAULT 'human'
                CHECK (source IN ('human','ai')),
-  ai_run_id    TEXT                           -- 同一次 AI 调用的批次号，用于撤销
+  ai_run_id    TEXT                           -- AI 调用标识；批次撤销尚未实现
 );
 
 CREATE INDEX idx_items_created ON items(created_at);
@@ -129,14 +131,15 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 ```
 
 - 中文必须用 `trigram`，默认分词器对中文基本无效。
-- trigram 要求查询串 ≥3 字符；不足 3 字符时走 `LIKE '%q%'` 回退（数据量小，性能无压力）。
+- trigram 要求查询串 ≥3 字符；不足 3 字符时走 `LIKE` 回退。查询按字面文本匹配：FTS 双引号转义，LIKE 转义 `%`、`_`、反斜线，不删除 URL、路径和括号。
+- 列表固定按 `(created_at DESC, id DESC)` 排序；新分页游标为 `{createdAt, id}`，相同时间戳也不漏记录，边界记录删除后仍可续页。兼容旧数字游标，但旧游标无法区分同毫秒记录。
 
 ### 5.3 时间与分组规则
 
 - 全部存 UTC 毫秒，展示时转本地时区。
-- 列表只按**创建时间**分组：今天 → 昨天 → 更早日期（标 `MM-DD`），组内时间倒序。
+- 列表只按**创建时间**分组：今天 → 昨天 → 更早日期（标 `MM-DD`），组内按 `(created_at DESC, id DESC)` 排序。
 - `remind_at` 只用于弹通知，**不参与分组、不影响排序**；列表里用「提醒 HH:mm」小标记提示。
-- 通知触发后写 `reminded_at`，避免重启后重复弹；应用未运行时错过的提醒，在启动后合并成一条“有 N 条提醒已过期”的提示，不逐条弹。
+- 请求系统展示通知前先写 `reminded_at`，避免重启后重复弹；该标记不保证 Windows 实际送达。应用未运行时错过的提醒，在启动后合并成一条“有 N 条提醒已过期”的提示，不逐条弹。
 - 不设 `due_at`、不做“逾期”分组，也不因未完成把记录挪到别的分组。
 - 时间展示：今天/昨天只显示 `HH:mm`，更早的显示 `MM-DD HH:mm`。
 - 修改 `remind_at` 时把 `reminded_at` 重置为 NULL，否则改到未来时间后不会再弹。
@@ -144,14 +147,19 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 ### 5.4 数据位置与备份
 
-| 项 | 路径 |
+| 项 | 路径 / 行为 |
 |---|---|
-| 数据库 | `%APPDATA%\TickNote\ticknote.db`（含 `-wal`、`-shm`） |
-| 设置 | `%APPDATA%\TickNote\settings.json` |
-| 导出 | `%APPDATA%\TickNote\export\` |
+| 数据库 | `%APPDATA%\TickNote\ticknote.db`（运行时含 `-wal`、`-shm`） |
+| 设置 | `%APPDATA%\TickNote\settings.json`，原子写入，保留 `.bak` 供损坏恢复 |
+| 草稿 | Electron userData 下的渲染层 localStorage，主窗、浮窗、逐条编辑分别保存 |
+| Markdown | 上次选择的目录，首次默认 `%APPDATA%\TickNote\export\`，每次建独立子目录 |
+| JSON 备份 | 设置 → 数据管理 → 备份全部记录，系统对话框选择路径 |
 
-备份 = 退出应用后复制 `ticknote.db`；导出 = 生成 Markdown，二者不冲突。旧版 `%APPDATA%\QuickNote` 的数据在首次启动 TickNote 时自动复制迁移一次；早期 TickNote 版本的 `quicknote.db` 会就地改名为 `ticknote.db`。
-- 自动备份：每天首次启动把数据库复制到 `backups/ticknote-YYYY-MM-DD.db`，保留最近 7 份；备份失败只记日志，不阻塞启动。
+- JSON 格式为 `{format:'ticknote-backup', version:1, exportedAt, items}`，保存 `Item` 的 id、正文、类型、状态、来源和各时间字段，不含设置、API Key、未提交草稿及内部 `ai_run_id`；它是记录备份，不是整个应用目录的镜像。
+- 恢复前完整校验文件（最多 100 MB、100000 条）；事务合并，只插入缺失 id，不覆盖已有记录，保持原时间；失败回滚。取消选择不修改数据。
+- 如需复制原始数据库，应先退出 App 和所有连接此库的 MCP 进程，保证 WAL 数据已落盘；不要仅复制运行中的主 db 文件。
+- 首次启动幂等复制旧 `%APPDATA%\QuickNote` 数据及旧 `quicknote.db`（含现有 WAL/SHM），保留旧文件。
+- **未实现 / 后续规划**：每天首次启动自动备份数据库并保留最近 7 份；当前不能依赖自动备份。
 
 ---
 
@@ -159,26 +167,28 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 ### 6.1 捕获
 
-1. 全局热键触发 → 若已有浮窗实例则聚焦并清空输入。
+1. 全局热键触发 → 若已有浮窗实例则聚焦，恢复未提交草稿与类型，不清空输入。
 2. 浮窗定位到**鼠标所在显示器**居中偏上（`screen.getDisplayNearestPoint(screen.getCursorScreenPoint())`）。
 3. 输入框为自适应高度的 textarea（1–5 行），无边框、不透明、带阴影。
-4. `Enter` 保存并隐藏；`Shift+Enter` 换行；`Esc` 直接隐藏且不保存。
+4. `Enter` 保存并隐藏；`Shift+Enter` 换行；`Esc` 明确丢弃当前草稿并隐藏；失焦、× 和热键收起保留草稿。
 5. 保存内容默认 `kind='todo'`、`status='open'`、`source='human'`；浮窗与主窗都用输入框上方的「待办 / 便签」切换决定 `kind`，不解析 `#todo` 之类的前缀。
-6. 保存后浮窗底部 1 秒内显示“已记录 + 时间”，不弹通知、不切窗口。
-7. 主窗底部的常驻多行输入框（composer）：高度从 1 行随内容增长，超过 6 行后内部滚动；`Enter` 提交并清空、保持焦点，`Shift+Enter` 换行，`Ctrl+N` 聚焦；与浮窗共用 `items:create`。
+6. 保存成功清空已提交草稿，显示“已记录”，约 450ms 后隐藏；重新唤起或编辑使旧计时器失效。保存失败保留输入并显示错误，提交锁防止连续 Enter 重复写入。
+7. 主窗底部的常驻多行输入框（composer）：高度随内容增长，最高 120px 后内部滚动；`Enter` 提交并清空、保持焦点，`Shift+Enter` 换行，`Ctrl+N` 聚焦；与浮窗共用 `items:create`。
 8. 中文输入法选词时按 `Enter` 只确认候选词、不提交（监听 composition 状态）。
-9. 热键的最后一个空格可能漏进刚聚焦的输入框，浮窗在唤起后 200ms 内丢弃空格键。
+9. 主窗、浮窗及抽屉编辑草稿随输入保存到 localStorage，刷新/重启可恢复；正文上限 2000 字符，有计数与保存状态。AI 返回仅可更新发起时仍有效的草稿，不能覆盖后续编辑或新会话。
+10. 热键的最后一个空格可能漏进刚聚焦的输入框，浮窗在唤起后 200ms 内丢弃空格键。
 
 ### 6.2 提醒（可选）
 
-- 在详情抽屉里设置：今天 18:00 / 明天 9:00 / 自定义时间 / 清除提醒。
+- 在详情抽屉里设置：10 分钟后 / 1 小时后 / 今天或明天 18:00 / 明天 9:00 / 自定义时间 / 清除提醒。自定义日期时间编辑完点击「应用」才保存，界面拒绝过去时间。
 - 预设「今天 18:00」若当前已过 18:00，则顺延到明天 18:00，避免设下去立刻弹通知。
 - 调度：主进程每 30 秒扫描 `remind_at <= now AND reminded_at IS NULL AND status='open'`，命中后先写 `reminded_at` 再弹通知；不堆大量 `setTimeout`，休眠唤醒后也能补上。
-- 通知：Electron `Notification` → Windows 操作中心 toast，标题「QuickNote 提醒」，正文截断 80 字；点击唤起主窗并定位到该条。
+- 通知：Electron `Notification` → Windows 操作中心 toast，标题「待办便签提醒」，正文截断 80 字；点击切换到提醒筛选并打开该条；合并通知打开首条。
 - 前提：App 必须运行（托盘常驻，默认开机自启，可在设置关闭）；`app.setAppUserModelId` 必须与安装快捷方式的 AUMID 一致，否则 toast 可能不显示。
 - 错过：App 未运行时到点的提醒不会弹，启动时扫描过期未提醒项，合并成一条“有 N 条提醒已过期”，不逐条补弹。
 - 抑制：Windows 勿扰 / 专注助手、系统通知关闭、应用通知被关都会静默，无法绕过，设置页给出说明。
-- 已完成的任务不再提醒；把提醒设到过去时间则立即提醒一次（由 `reminded_at` 保证不重复）。
+- 已完成的任务不再提醒；MCP/底层接口允许过去时间，在下一轮扫描时处理（最长约 30 秒），界面自定义输入要求未来时间。
+- 「提醒」筛选展示所有未完成且设了提醒的记录，含已经标记提醒的记录；详情显示待提醒 / 待补提醒 / 已提醒 / 已补提醒 / 已完成。「已补提醒」按时间差超过 60 秒推断，不是系统送达回执。
 - 提醒不改变列表顺序和分组；没有“稍后提醒”按钮，改时间就是重新设置。
 
 ### 6.3 完成
@@ -187,15 +197,15 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 ### 6.4 搜索
 
-顶部单一搜索框，输入即搜（150ms 防抖），命中高亮。结果按时间倒序，显示内容、创建时间、状态。
+顶部单一搜索框，输入即搜（150ms 防抖），命中高亮。搜索覆盖全部记录，不叠加当前列表筛选；结果按 `(created_at DESC, id DESC)` 排序，显示内容、创建时间、状态。主窗最多展示 50 条，并在达到上限时提示缩小关键词。数据变更或窗口恢复焦点后重查，旧请求不能覆盖新查询。
 
 ### 6.5 导出 Markdown
 
 - 命名：`notes-YYYY-MM-DD.md`，按创建日期分文件。
 - 位置：主窗导出时弹系统「选择文件夹」对话框，默认上次使用的目录（首次为 `%APPDATA%\TickNote\export`）；取消则不写文件。托盘「导出 Markdown」不弹框，直接写到上次/默认目录。
-- 待办格式：`- [ ] 内容`（有提醒时追加 `提醒 18:00`），已完成 `- [x]`。
+- 待办格式：`- [ ] 内容`（有提醒时追加完整本地日期时间，例如 `提醒 2026-10-30 18:00`），已完成 `- [x]`。
 - 入口：主窗 `⋯` →「导出 Markdown」（范围弹窗 + 文件夹选择，完成后 toast 显示条数与目标目录）+ 托盘菜单「导出 Markdown」（气泡提示条数与目录）。
-- 每次导出覆盖目标文件（幂等），不做实时双向同步。
+- 每次在选定目录中创建独立 `TickNote-YYYY-MM-DD-HHmmss-<随机后缀>` 子目录，里面按日期写 Markdown；不覆盖以前导出的文件，不做实时双向同步。
 
 ---
 
@@ -205,7 +215,7 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 | 项 | 规格 |
 |---|---|
-| 尺寸 | 宽 620，高随内容 120–216（主进程上限 240） |
+| 尺寸 | 宽 620；创建初值 150，渲染后通常 242–298；resize 主进程限制 180–330 |
 | 样式 | `frame:false`、`alwaysOnTop:true`、`skipTaskbar:true`、`resizable:false`、不透明 |
 | 顶部条 | 18px 拖动条：左侧握把可拖动整个窗口，右侧 `×` 隐藏浮窗（不退出应用） |
 | 位置 | 首次唤起在鼠标所在屏幕居中；拖动后本次运行内记住，再次唤起重用并夹回工作区 |
@@ -217,15 +227,17 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 - 默认 900×640，可缩放；关闭时收进托盘而不是退出（首次关闭给出一次提示）。
 - 顶部：标题栏只保留搜索框与右侧 `⋯` 菜单/设置（不显示应用名）；`⋯` 内含「导出 Markdown」与外观切换（跟随 / 浅色 / 深色）→ 筛选行（chip + 右侧统计）。
+- 筛选：全部 / 待办 / 便签 / 已完成 / 提醒；统计展示全部未完成待办，跨天不归零。空状态按筛选与搜索分别提示。
 - 主体：按创建日期分组（今天 / 昨天 / 更早日期），分组头可折叠；组内按时间倒序；新记录落在顶部并短暂高亮。
+- 刷新：保持已加载页数和当前详情；MCP 写入由主进程每 2 秒检查 `PRAGMA data_version` 后通知刷新，回到窗口也重查；跨天更新分组与统计。
 - 底部：常驻多行输入框（composer），左侧待办/便签切换，右侧「记录」按钮；内容为空时按钮禁用。
 
 ### 7.3 托盘常驻
 
 - 应用常驻托盘：主窗 `close` 事件拦截为 `hide()`，只有托盘菜单「退出」才真正 `app.quit()`（用 `isQuitting` 标志区分）。
-- 左键单击托盘图标：显示并聚焦主窗；再次单击可收起。
-- 右键菜单：打开浮窗 / 打开主窗 / 今日未完成 N 条（禁用项，仅展示）/ 导出 Markdown / 设置 / 退出。
-- 图标 tooltip 显示“今天未完成 N 条、待提醒 M 条”。Windows 托盘没有原生角标 API，不做角标，避免自绘多套状态图标。
+- 左键单击托盘图标：显示并聚焦主窗；收起使用窗口关闭按钮。
+- 右键菜单：打开浮窗 / 打开主窗 / 未完成待办 N 条（禁用项，仅展示）/ 导出 Markdown / 设置 / 退出。
+- 图标 tooltip 显示“未完成待办 N 条、待提醒 M 条”。Windows 托盘没有原生角标 API，不做角标，避免自绘多套状态图标。
 - 单实例：`requestSingleInstanceLock`，第二次启动只唤起已有实例；带 `--autostart` 启动时不抢焦点。
 - 首次关闭主窗时提示一次“已收进托盘”，之后不再提示。
 
@@ -234,19 +246,21 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 - 设置页提供「开机自启」开关，默认开启（提醒依赖常驻），可随时关闭；关闭只影响下次开机，不退出当前进程。
 - 实现：`app.setLoginItemSettings({ openAtLogin, path: process.execPath, args: ['--autostart'] })`；带 `--autostart` 启动时只进托盘，不显示主窗。
 - 状态以 `app.getLoginItemSettings()` 为准，不只看 `settings.json`：用户在任务管理器「启动」里禁用后，开关旁显示“已开启但被系统阻止”（读取 `executableWillLaunchAtLogin`）。
-- 便携版（未安装到固定路径）移动目录后登录项失效，设置页注明“建议使用安装版”，并提供重新开启。
+- 便携版移动目录后登录项可能失效；请放在固定目录后重新切换自启，长期使用建议安装版。当前没有便携版专属提示条。
 
 ### 7.5 设置（最小集）
 
-实现为主窗右侧滑出的设置面板（顶部「设置」按钮或托盘菜单「设置」打开），包含：
+实现为主窗内的设置面板（顶部「设置」按钮或托盘菜单「设置」打开），包含：
 
 - 全局热键：显示当前组合，点击「录制」后按一次组合键即改键并立即重新注册；注册失败在面板顶部红字提示，托盘入口兜底。
 - 开机自启：开关写 `app.setLoginItemSettings`，以 `getLoginItemSettings` 为准；`executableWillLaunchAtLogin=false` 时提示“被系统阻止”；开发模式不写启动项（`process.defaultApp` 守卫）。
-- 浮窗失焦隐藏：关闭后浮窗只能按 Esc 收起。
+- 浮窗失焦隐藏：关闭后失焦不收起，仍可用 ×、热键或 Esc 收起；Esc 丢弃，其他方式保留草稿。
 - MCP 删除工具：默认关闭，开启并重启 AI 客户端后 `delete_item` 才注册。
 - AI 润色：启用开关（开启后才显示配置）、接口地址、模型、API Key（输入后保存，用 `safeStorage` 加密写 settings.json，可清除）；浮窗与主窗出现「AI 润色」按钮，结果回显、Enter 才记录。
+- AI 连接测试：先保存配置再点击，发送固定句「请回复 OK」，10 秒超时，不发送记录；提示接口/模型/Key 错误。加密不可用时拒绝保存新 Key，不再明文降级；旧 `plain:` 值启动时尝试加密，失败则清除并需重新填写。设置写入失败不提交新的内存状态。
+- 数据管理：完整记录 JSON 备份、合并恢复（不覆盖同 id）、清空全部记录（二次确认）。
 - 卸载 TickNote：安装版打开安装目录里的 `Uninstall TickNote.exe`（二次确认）；便携版提示“直接删除解压目录”，数据仍在 `%APPDATA%\TickNote`。
-- 主题仍由顶部「跟随 / 浅色 / 深色」切换。
+- 主题在顶部 `⋯` 菜单的「跟随 / 浅色 / 深色」切换。
 
 ### 7.6 热键冲突
 
@@ -254,15 +268,13 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 ### 7.7 长内容查看（详情抽屉）
 
-- 列表行以卡片呈现：圆角、1px 边框、10×12 内边距、卡片间距 8px；悬停变浅灰，选中加品牌色边框与左侧色条。
-- 列表行最多显示 **2 行**，超出以省略号截断；不在列表里就地展开全文。
-- 点击整行（便签、待办均可）从右侧滑出详情抽屉（宽 360）；列表滚动位置不变，当前行用左侧色条标记。
-- 行首复选框是例外：点击只切换该待办的完成状态，不打开抽屉；点击其余区域才打开。
-- 行首固定 14px 类型槽：待办是复选框，便签是灰色文档小图标，两者文字左对齐；全部列表里可一眼区分类型。
-- 行尾在悬停 / 选中时出现 `×`：点击直接删除，toast 提供 5 秒「撤销」（按原 id、时间、状态与提醒写回）；抽屉内的二次确认删除保留作为兜底。
-- 抽屉内容：类型（可在待办/便签间切换）+ 创建时间、正文（`P1` 起可直接编辑、失焦保存）、提醒、状态；底部操作：完成 / 设提醒 / 复制 / 删除。
-- `Esc` 或右上角 × 关闭抽屉；`↑` `↓` 在列表中移动选中，`Enter` 打开抽屉。
-- 不做居中弹窗卡片：会遮挡列表，也会打断连续浏览的节奏。
+- 列表使用轻背景与留白，正文最多 2 行；悬停/选中显示行尾删除，选中行有色条。待办复选框与便签图标使用对齐的类型槽，增大点击区域。
+- 点击整行打开右侧详情，复选框只切换完成状态。宽窗抽屉可调宽（上限 min(560px, 50vw)）；窗口宽度 ≤780px 时改为约 420px 覆盖层。
+- 顶部导航与底部操作固定，中间正文、提醒区域独立滚动；长内容时主要操作仍可达。
+- 正文最多 2000 字符；编辑保留本地草稿，失焦保存，显示保存中 / 已保存 / 失败及重试。关闭、上一条/下一条、切换类型/状态前等待保存，失败留在当前记录。
+- 列表与抽屉删除统一即时删除 + 5 秒「撤销」，恢复原 id、内容、时间、状态及提醒；无长期回收站。撤销窗口结束后无法通过此按钮恢复。
+- 提醒自定义输入点击「应用」提交；复制使用当前编辑内容并给出反馈。
+- `Esc` / × 关闭；列表 `↑` `↓` 移动选择，`Enter` 打开。设置/导出弹层有对话框语义、初始焦点、Tab 约束及关闭后的焦点恢复。
 
 ---
 
@@ -270,28 +282,33 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 | 通道 | 入参 | 返回 | 说明 |
 |---|---|---|---|
-| `items:create` | `{content, kind?}` | `{id}` | 浮窗与主窗共用 |
-| `capture:hide` | — | — | Esc / 失焦 |
-| `items:list` | `{filter:'all'\|'todo'\|'note'\|'done', cursor?: number, limit?: 1..50}` | `Item[]` | 按创建时间倒序分页，默认 30 条 |
-| `items:search` | `{q, limit}` | `Item[]` | 走 FTS |
-| `items:get` | `{id}` | `Item \| null` | 单条读取（通知点击后定位） |
-| `items:update` | `{id, content}` | `Item` | 抽屉内编辑正文，刷新 `updated_at` |
-| `items:set-kind` | `{id, kind:'todo'\|'note'}` | `Item` | 已记录条目切换类型，保留状态与创建时间 |
-| `items:delete` | `{id}` | `boolean` | 硬删除（无回收站） |
-| `items:restore-deleted` | `{item}` | `Item` | 行内删除的撤销：按原 id/时间/状态写回 |
-| `items:set-reminder` | `{id, remindAt}` | `Item` | 设置提醒，传 `null` 清除；同时重置 `reminded_at` |
-| `items:complete` | `{id}` | `Item` | 完成 |
-| `items:restore` | `{id}` | `Item` | 取消完成 |
-| `settings:get` / `settings:set` | — / `SettingsPatch` | `Settings` | 主题、热键、失焦隐藏、MCP 删除、AI 配置（Key 单独加密） |
-| `settings:open`（main → renderer） | — | — | 托盘「设置」通知主窗打开设置面板 |
-| `autostart:get` / `autostart:set` | — / `{enabled}` | `AutostartStatus` | 读系统真实状态 / 写登录项（含 blocked） |
-| `ai:parse` | `{content}` | `{content,kind} \| null` | 3 秒超时；失败返回 null 由渲染层按原文保存 |
-| `export:markdown` | — | `{dir, files, count}` | 触发导出 |
-| `window:open-main` | — | — | 托盘 → 主窗 |
-| `items:changed`（main → renderer） | — | — | 记录新增/完成后通知主窗刷新 |
-| `items:focus`（main → renderer） | `{id}` | — | 点通知后定位并打开抽屉 |
+| `items:create` | `{content, kind}` | `Item` | 正文 trim 后 1–2000 字符 |
+| `items:list` | `{filter, cursor?, limit?}` | `Item[]` | filter 为 all/todo/note/done/reminders；cursor 为 `{createdAt,id}` 或兼容数字；默认 30，最大 50 |
+| `items:search` | `{q, limit?}` | `Item[]` | q ≤200；默认 30，最大 50；主窗请求 50 |
+| `items:get` | `{id}` | `Item / null` | 读取单条 |
+| `items:update` | `{id, content}` | `Item / null` | 正文 1–2000 字符，更新 updatedAt |
+| `items:set-kind` | `{id, kind}` | `Item / null` | 切换类型，保留状态和创建时间 |
+| `items:complete` / `items:restore` | `{id}` | `Item / null` | 完成 / 取消完成 |
+| `items:set-reminder` | `{id, remindAt:number/null}` | `Item / null` | 重置 remindedAt |
+| `items:delete` | `{id}` | `boolean` | 硬删除 |
+| `items:restore-deleted` | `{item}` | `Item / null` | 列表、抽屉的 5 秒撤销 |
+| `items:clear-all` | — | `number` | 删除条数；界面二次确认 |
+| `items:stats` | — | `{todayOpenTodos,openTodos,pendingReminders}` | 界面/托盘使用 openTodos |
+| `export:markdown` | `{scope?}` | `ExportResult / null` | all/todo/note/done/reminders/today；取消为 null |
+| `backup:export` / `backup:import` | — | `{path,count} / null` | 系统文件选择；取消为 null，恢复 count 为新增条数 |
+| `settings:get` / `settings:set` | — / `SettingsPatch` | `Settings` | 白名单，不向 renderer 返回明文或密文 Key |
+| `autostart:get` / `autostart:set` | — / `{enabled}` | `AutostartStatus` | 含系统 blocked 状态 |
+| `ai:parse` | `{content}` | `{content,kind} / null` | 3 秒超时，失败保留输入 |
+| `ai:test` | — | `string` | 10 秒超时，使用已保存配置 |
+| `app:uninstall` | — | `UninstallResult` | 打开本地卸载程序 |
+| `capture:hide` / `window:open-main` | — | — | renderer → main，send |
+| `capture:resize` | `height:number` | — | send，clamp 180–330 |
+| `capture:shown` | — | — | main → renderer，恢复草稿并聚焦 |
+| `settings:open` | — | — | main → renderer，托盘打开设置 |
+| `items:changed` | — | — | main → renderer，写操作、外部数据变化或跨天后刷新 |
+| `items:focus` | `{id}` | — | main → renderer，通知点击定位 |
 
-所有入参在 main 侧用 zod 校验，渲染层不做信任假设。
+入参在 main 侧用 zod 校验。错误通过拒绝的 Promise 返回，界面提供可读错误并保留输入。精确 DTO 以 `src/shared/types.ts`、`src/preload/index.ts` 为准。
 
 ---
 
@@ -305,11 +322,11 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 AI 客户端 ──stdio──> TickNote.exe (ELECTRON_RUN_AS_NODE) ──> ticknote.db (WAL)
 ```
 
-`mcp/server.ts` 只依赖 `repo.ts` 和数据库路径解析，不加载任何窗口/Electron UI 模块。构建时用 esbuild 打成 `resources/mcp/server.js`，打包时作为 `extraResources` 放到安装目录 `resources\mcp\server.js`（不进 asar）。`delete_item` 是否注册由同目录 `settings.json` 的 `mcpDeleteEnabled` 决定，改了开关需要重启 AI 客户端（MCP 进程是每个客户端各自启动的）。
+`mcp/server.ts` 只依赖 `repo.ts` 和数据库路径解析，不加载任何窗口/Electron UI 模块。构建时用 esbuild 打成 `resources/mcp/server.js`，打包时作为 `extraResources` 放到安装目录 `resources\mcp\server.js`（不进 asar）。`delete_item` 是否注册由数据库同目录 `settings.json` 的 `mcpDeleteEnabled` 决定，改了开关需要重启 AI 客户端（MCP 进程是每个客户端各自启动的）。
 
 ### 9.2 客户端配置示例
 
-NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装时可改）：
+NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\TickNote`（安装时可改）：
 
 ```json
 {
@@ -323,7 +340,7 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 }
 ```
 
-数据库路径由 server 自己按 `%APPDATA%` 解析，不在配置里写死；如需多库，支持 `QUICKNOTE_DB` 覆盖。
+数据库路径由 server 自己按 `%APPDATA%` 解析，不在配置里写死；如需多库，支持 `TICKNOTE_DB` 覆盖；`TICKNOTE_DATA`（兼容 `QUICKNOTE_DATA`）改变默认数据目录。
 
 ### 9.3 工具契约
 
@@ -350,13 +367,13 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 ### 9.4 并发与锁
 
 - 两个进程都以 `PRAGMA journal_mode=WAL` 打开，`busy_timeout=3000`。
-- 写操作包在 `node:sqlite` 的同步事务里，冲突时自动重试一次。
+- SQLite 忙等待由 `busy_timeout=3000` 处理，无额外应用层自动重试一次的逻辑。MCP 创建前先解析提醒时间，内容与提醒一次 INSERT，非法提醒不留下半条记录。
 - 不做长事务；单次调用只写一条记录。
 
 ### 9.5 权限与审计
 
 - AI 写入的记录带 `source='ai'` + `ai_run_id`。
-- 主窗用一个小标记区分 AI 记录，支持“撤销这次 AI 写入”（按 `ai_run_id` 批量删）。
+- 主窗用小标记区分 AI 记录。**未实现 / 后续规划**：“撤销这次 AI 写入”（按 `ai_run_id` 批量删）；MCP 删除是硬删除，不提供 GUI 的 5 秒撤销。
 - 可选写入白名单（未来）：只允许 `note` 类型。
 
 ---
@@ -369,8 +386,9 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 - 默认 `https://api.deepseek.com/v1` + `deepseek-chat`（OpenAI 兼容，可在设置里改成任意端点与模型）。
 - 调用 `/chat/completions`，要求返回 JSON：`{content, kind}`，只做“整理措辞 + 判定便签/待办”，不解析日期。
 - 失败或超时（3s）时保留原文并提示「AI 润色失败，已保留原文」，**绝不丢用户输入**、也不会误保存。
-- 只发送当前这一行文本，不发送历史记录；API Key 用 Electron `safeStorage` 加密后存本地。
-- 设置面板里只有开启开关后，才显示接口地址 / 模型 / API Key 的配置项。
+- 只发送当前输入框文本（可多行，最多 2000 字符），不发送历史记录；API Key 用 Electron `safeStorage` 加密后存本地。
+- 请求绑定发起时的草稿版本；编辑、保存或会话切换使旧结果失效。撤销润色同时恢复原文和原类型。
+- 设置面板启用后显示配置与「测试连接」；连接测试发送固定句，不发送当前输入，10 秒超时。
 
 ---
 
@@ -383,10 +401,10 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 - 不需要 `electron-rebuild`：无原生依赖，`node:sqlite` 随 Electron 运行时提供。
 - 安装包未签名 → Windows SmartScreen 会提示“未知发布者”，自用可接受；对外分发再考虑证书。
 - 卸载入口：安装后系统「设置 → 应用」会列出 TickNote；`build/installer.nsh` 额外在开始菜单生成“卸载 TickNote”快捷方式，应用内设置面板也有卸载按钮（便携版会提示删目录）。
-- 主进程依赖必须内联：`externalizeDepsPlugin({ exclude: ['zod'] })` 把 zod 打进 `out/main/index.js`（约 195KB），否则去掉 node_modules 后会报 `Cannot find module 'zod'`；preload/renderer 的依赖同样已 bundle。
-- 体积：`electronLanguages` 只保留 `zh-CN / en-US`（语言包 48.8MB → 1.2MB），NSIS 用 `compression: maximum`。实测免安装目录 311MB、`TickNote-0.1.0-Setup.exe` **107.8MB**；安装包主要体积是 Electron 本体，换 Tauri 才能显著降下来。
-- 分发策略（自用）：不做代码签名，`npm run dist` 后用 `npm run pack:portable` 生成 `release\TickNote-0.1.0-portable.zip`（约 139MB，解压即用，避开安装包 SmartScreen）；对方如从网络收到，先 `Unblock-File` 或属性里“解除锁定”。
-- 图标使用 `build/icon.png`（256px，绿底便签）；首次启动生成数据库并跑 `schema.sql`，用 `PRAGMA user_version` 管理迁移版本。
+- 主进程依赖必须内联：构建把 zod 打进 `out/main/index.js`，否则去掉 node_modules 后会报 `Cannot find module 'zod'`；preload/renderer 的依赖同样已 bundle。
+- 体积：`electronLanguages` 只保留 `zh-CN / en-US`，NSIS 用 `compression: maximum`。0.1.1 安装包 `TickNote-0.1.1-Setup.exe` 约 108 MiB，主要体积来自 Electron 本体。
+- 分发：`npm run dist` 生成 `release` 下的 NSIS 和 win-unpacked，`npm run pack:portable` 将 win-unpacked 打为 `release\TickNote-0.1.1-portable.zip`（解压后运行 TickNote.exe）；产物未签名。安装包与便携包不含用户数据。
+- 图标使用 `build/icon.png`（256px，绿底便签）；首次启动生成数据库并执行随包编译的 `src/main/db/schema.ts` DDL，用 `PRAGMA user_version` 管理迁移版本。
 
 ---
 
@@ -403,7 +421,7 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 | 包内 MCP 不可执行 | 被压进 asar / 依赖解析失败 | esbuild 单文件 + `extraResources` 放到 `resources\mcp` | 按 9.2 配置在 Cursor 里调用一次 |
 | 通知不弹 | 未设 AUMID / 系统勿扰 / 通知被关 | 安装快捷方式与 AUMID 对齐；设置页提示检查系统通知 | 安装版与免安装版各测一次 toast |
 | 自启失效 | 安全软件拦截 / 便携版路径变化 / 任务管理器禁用 | 以系统状态为准并提示；建议安装版 | 重启机器验证；任务管理器禁用后再看提示 |
-| 数据损坏/误删 | 无备份 | 导出 Markdown + 每日自动备份一份 db | 手动删除后从备份恢复 |
+| 数据损坏/误删 | 无备份 | 手动 JSON 记录备份/事务恢复 + 设置原子写入；每日自动备份未实现 | 手动删除后从备份恢复 |
 
 ---
 
@@ -416,7 +434,13 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 | P2 | MCP stdio（6 个工具） | Cursor / Claude Desktop 能列出工具、创建并读回记录；App 未启动时同样可用 |
 | P3 | 安装包 / 自启 / 设置页 / 可选 AI 润色 | 干净机器安装后可用；重启后自动进托盘且不弹主窗；SmartScreen 提示可绕过；API 失败不丢输入 |
 
-> 当前进度：P0–P3 均已实现；自动可验证部分通过，需人工验证的项按阶段列在下方清单。安装包已产出：`release\TickNote-0.1.0-Setup.exe`。
+> 以下为历史阶段计划与当时验证记录，保留原日期、版本及待测项，不作为 0.1.1 当前行为定义。每日自动备份、AI 批次撤销不在已实现范围。
+
+### 0.1.1 当前验证（2026-10-30）
+
+- 类型检查、lint、生产构建通过；Vitest 5 文件 8 用例通过；MCP 在 Node 与 Electron 运行时通过（含非法提醒不残留记录）。
+- 隔离数据目录下，打包程序 9 项 UI 回归通过；JSON 备份合并/重复恢复/非法文件、真实 MCP 进程写入后的搜索刷新通过；浅色、深色及 720×520 布局已检查。
+- 待人工：真实 Windows 通知送达、安装/卸载、自启与系统禁用、输入法、多显示器与 DPI。详见 [0.1.1 验证指南](docs/VALIDATION-0.1.1.md)。
 
 ### P0 验证记录（2026-10-29）
 
@@ -527,22 +551,22 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 | 默认热键 | `Ctrl+Shift+Space`，设置页支持录制式改键，注册失败立即提示 |
 | 分组方式 | 只按创建日期分组（今天 / 昨天 / 更早），不做“逾期”分组 |
 | 时间语义 | 不设 `due_at`；仅可选 `remind_at` 做系统通知，不参与排序 |
-| 便签/待办 | 默认按 `kind` 分开筛选（全部 / 待办 / 便签 / 已完成） |
+| 便签/待办 | 全部 / 待办 / 便签 / 已完成 / 提醒 |
 | 浮窗失焦 | 默认自动隐藏 |
-| 删除 | 抽屉内删除 + 二次确认（3 秒内再点一次），不做回收站 |
+| 删除 | 列表与抽屉即时删除，统一 5 秒撤销，不做长期回收站 |
 | 便签完成框 | 不显示，只有待办可勾选 |
 | AI 默认服务 | DeepSeek（`api.deepseek.com/v1` + `deepseek-chat`），可改任意兼容端点 |
 | AI 润色范围 | 只整理措辞与判定便签/待办，不解析日期；结果回显，用户确认后才记录 |
 | 捕获时设日期 | 不提供，保持零摩擦；提醒在抽屉里设置 |
-| 提醒预设 | 今天 18:00（已过点则顺延到明天）/ 明天 9:00 / 自定义 / 清除 |
-| 导出入口 | 主窗顶部「导出」按钮 + 托盘菜单「导出 Markdown」 |
+| 提醒预设 | 10 分钟后 / 1 小时后 / 今天或明天 18:00 / 明天 9:00 / 自定义并应用 / 清除 |
+| 导出入口 | 主窗 `⋯` → 导出 Markdown + 托盘菜单；每次独立目录 |
 | 长内容查看 | 列表行 2 行截断，点击整行打开右侧详情抽屉，不用居中弹窗 |
 | 外观 | 跟随系统 / 浅色 / 深色，写入 settings.json，重启后保持；两个窗口同步 |
 | 默认类型 | 待办（按钮顺序 待办 / 便签），便签需手动切换 |
 | 开机自启 | 默认开启，`--autostart` 只进托盘不弹主窗；可在设置里关闭 |
 | MCP 删除工具 | 默认关闭；开启后需重启 AI 客户端才生效 |
-| AI Key 存储 | `safeStorage` 加密后写 settings.json；面板可保存/清除，不显示明文 |
-| 安装包 | NSIS 按用户安装（`%LOCALAPPDATA%\Programs\QuickNote`），未签名，SmartScreen 提示可绕过 |
+| AI Key 存储 | `safeStorage` 加密后写 settings.json；不可用时拒绝保存；不向 renderer 暴露密文 |
+| 安装包 | NSIS 按用户安装（`%LOCALAPPDATA%\Programs\TickNote`），未签名，SmartScreen 提示可绕过 |
 | 托盘常驻 | 关闭主窗只收起不退出，退出仅从托盘菜单 |
 
 ---
@@ -573,12 +597,15 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 | 2026-10-30 | v1.10 | 开源化：主进程拆分为 `windows/tray/ipc/settings`，渲染层拆出 `components/` 与 `utils.ts`（main.tsx 1380→803 行）；去 QuickNote 化（appId `com.ticknote.app`、DB 改名 `ticknote.db` 并兼容迁移、localStorage key）；Electron 安全加固（CSP、`sandbox:true`、禁止新窗与跳转、preload 缺失时快速失败）；补充 MIT LICENSE、README 中英、CONTRIBUTING/SECURITY/CODE_OF_CONDUCT/CHANGELOG、docs/ARCHITECTURE|MCP|PRIVACY、CI/Release 工作流、Issue/PR 模板、dependabot、oxlint/Prettier、Vitest 单测、`.editorconfig/.gitattributes/.nvmrc` |
 | 2026-10-30 | v1.11 | 列表行内删除：悬停/选中显示 `×`，删除后 toast 提供 5 秒「撤销」（`items:restore-deleted` + `repo.restore`，按原 id/时间/状态/提醒写回）；主窗移除顶部「待办便签」品牌字；导出改为主窗弹文件夹选择框（托盘仍静默写上次目录） |
 | 2026-10-30 | v1.12 | 搜索命中高亮：列表正文按查询词大小写不敏感地包 `<mark class="hit">`，支持一条内多次命中 |
+| 2026-10-30 | v1.13 | 对应应用 0.1.1：草稿恢复与异步防覆盖、复合分页和字面搜索、2 秒外部写入刷新、独立导出目录、JSON 记录备份合并恢复、统一删除撤销、提醒筛选与显式应用、AI 连接测试和设置安全持久化；修复输入区重复深色焦点框、外观菜单换行、AI 润色按钮常驻高亮；同步 IPC/UI 规格、验证指南与截图，明确自动备份和 AI 批次撤销未实现，历史提案不视为现状 |
 
 ---
 
-## 16. 交互与 UI 优化方案（v1.7 已落地）
+## 16. 历史交互与 UI 优化提案（非当前功能清单）
 
-按“收益/成本”排序，建议分三批做：
+> 这是早期提案，不能将所有建议视为已实现。当前规格见第 6–8 节；例如独立「完成撤销」toast、「今晚 20:00」预设仍未实现，抽屉删除二次确认已由 5 秒撤销取代。
+
+原提案按“收益/成本”排序：
 
 ### 第一批（低成本、手感收益最大）
 

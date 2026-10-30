@@ -2,7 +2,15 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { CreateItemInput, ExportScope, Item, ItemKind, ItemStatus, ListQuery } from '../../shared/types';
+import type {
+  CreateItemInput,
+  ExportScope,
+  Item,
+  ItemKind,
+  ItemStats,
+  ItemStatus,
+  ListQuery,
+} from '../../shared/types';
 import { SCHEMA, SCHEMA_VERSION } from './schema';
 
 type Row = Record<string, unknown>;
@@ -24,6 +32,7 @@ export interface UpdateItemPatch {
 
 export interface Repo {
   db: DatabaseSync;
+  dataVersion(): number;
   create(input: CreateItemInput, source?: 'human' | 'ai', aiRunId?: string): Item;
   list(query: ListQuery): Item[];
   listRange(query: ListRangeQuery): Item[];
@@ -35,11 +44,12 @@ export interface Repo {
   remove(id: string): boolean;
   restore(item: Item): Item | null;
   clearAll(): number;
+  importItems(items: Item[]): number;
   setReminder(id: string, remindAt: number | null): Item | null;
   dueReminders(now: number): Item[];
   markReminded(ids: string[], at: number): void;
   allForExport(scope?: ExportScope): Item[];
-  stats(dayStart: number): { todayOpenTodos: number; pendingReminders: number };
+  stats(dayStart: number): ItemStats;
   close(): void;
 }
 
@@ -53,7 +63,8 @@ function mapRow(row: Row): Item {
     remindedAt: row.reminded_at === null || row.reminded_at === undefined ? null : Number(row.reminded_at),
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
-    completedAt: row.completed_at === null || row.completed_at === undefined ? null : Number(row.completed_at),
+    completedAt:
+      row.completed_at === null || row.completed_at === undefined ? null : Number(row.completed_at),
     source: row.source === 'ai' ? 'ai' : 'human',
   };
 }
@@ -96,8 +107,8 @@ export function openRepo(dbPath: string): Repo {
     const now = Date.now();
     const id = randomUUID();
     db.prepare(
-      'INSERT INTO items (id, content, kind, status, created_at, updated_at, source, ai_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-    ).run(id, input.content, input.kind, 'open', now, now, source, aiRunId ?? null);
+      'INSERT INTO items (id, content, kind, status, created_at, updated_at, source, ai_run_id, remind_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    ).run(id, input.content, input.kind, 'open', now, now, source, aiRunId ?? null, input.remindAt ?? null);
     const item = get(id);
     if (!item) throw new Error('insert failed');
     return item;
@@ -111,15 +122,19 @@ export function openRepo(dbPath: string): Repo {
     if (query.filter === 'todo') clauses.push("kind = 'todo' AND status = 'open'");
     if (query.filter === 'note') clauses.push("kind = 'note'");
     if (query.filter === 'done') clauses.push("status = 'done'");
+    if (query.filter === 'reminders') clauses.push("remind_at IS NOT NULL AND status = 'open'");
     if (typeof query.cursor === 'number' && Number.isFinite(query.cursor)) {
       clauses.push('created_at < ?');
       params.push(query.cursor);
+    } else if (query.cursor && typeof query.cursor === 'object') {
+      clauses.push('(created_at < ? OR (created_at = ? AND id < ?))');
+      params.push(query.cursor.createdAt, query.cursor.createdAt, query.cursor.id);
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
     params.push(limit);
     const rows = db
-      .prepare(`SELECT * FROM items ${where} ORDER BY created_at DESC, rowid DESC LIMIT ?`)
+      .prepare(`SELECT * FROM items ${where} ORDER BY created_at DESC, id DESC LIMIT ?`)
       .all(...params) as Row[];
     return rows.map(mapRow);
   };
@@ -155,7 +170,7 @@ export function openRepo(dbPath: string): Repo {
     const capped = Math.min(Math.max(limit, 1), 50);
 
     if (text.length >= 3) {
-      const phrase = text.replace(/["^()*:]/g, ' ').replace(/\s+/g, ' ').trim();
+      const phrase = text.replace(/"/g, '""');
       if (phrase.length >= 3) {
         try {
           const rows = db
@@ -188,7 +203,9 @@ export function openRepo(dbPath: string): Repo {
 
   const updateContent = (id: string, content: string): Item | null => {
     const now = Date.now();
-    const result = db.prepare('UPDATE items SET content = ?, updated_at = ? WHERE id = ?').run(content, now, id);
+    const result = db
+      .prepare('UPDATE items SET content = ?, updated_at = ? WHERE id = ?')
+      .run(content, now, id);
     if (Number(result.changes) === 0) return null;
     return get(id);
   };
@@ -266,6 +283,7 @@ export function openRepo(dbPath: string): Repo {
     if (scope === 'todo') clauses.push("kind = 'todo' AND status = 'open'");
     if (scope === 'note') clauses.push("kind = 'note'");
     if (scope === 'done') clauses.push("status = 'done'");
+    if (scope === 'reminders') clauses.push("remind_at IS NOT NULL AND status = 'open'");
     if (scope === 'today') {
       const start = new Date();
       start.setHours(0, 0, 0, 0);
@@ -308,6 +326,7 @@ export function openRepo(dbPath: string): Repo {
 
   return {
     db,
+    dataVersion: () => Number(db.prepare('PRAGMA data_version').get()?.data_version),
     create,
     list,
     listRange,
@@ -319,19 +338,57 @@ export function openRepo(dbPath: string): Repo {
     remove,
     restore,
     clearAll,
+    importItems: (items) => {
+      const insert = db.prepare(`INSERT INTO items
+        (id, content, kind, status, remind_at, reminded_at, created_at, updated_at, completed_at, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`);
+      let count = 0;
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        for (const item of items) {
+          count += Number(
+            insert.run(
+              item.id,
+              item.content,
+              item.kind,
+              item.status,
+              item.remindAt,
+              item.remindedAt,
+              item.createdAt,
+              item.updatedAt,
+              item.completedAt,
+              item.source,
+            ).changes,
+          );
+        }
+        db.exec('COMMIT');
+        return count;
+      } catch (error) {
+        db.exec('ROLLBACK');
+        throw error;
+      }
+    },
     setReminder,
     dueReminders,
     markReminded,
     allForExport,
     stats: (dayStart: number) => {
       const openRow = db
-        .prepare("SELECT COUNT(*) AS c FROM items WHERE kind = 'todo' AND status = 'open' AND created_at >= ?")
+        .prepare(
+          "SELECT COUNT(*) AS c FROM items WHERE kind = 'todo' AND status = 'open' AND created_at >= ?",
+        )
         .get(dayStart) as Row | undefined;
       const remindRow = db
-        .prepare("SELECT COUNT(*) AS c FROM items WHERE status = 'open' AND remind_at IS NOT NULL AND reminded_at IS NULL")
+        .prepare(
+          "SELECT COUNT(*) AS c FROM items WHERE status = 'open' AND remind_at IS NOT NULL AND reminded_at IS NULL",
+        )
         .get() as Row | undefined;
       return {
         todayOpenTodos: Number(openRow?.c ?? 0),
+        openTodos: Number(
+          (db.prepare("SELECT COUNT(*) AS c FROM items WHERE kind = 'todo' AND status = 'open'").get() as Row)
+            .c,
+        ),
         pendingReminders: Number(remindRow?.c ?? 0),
       };
     },

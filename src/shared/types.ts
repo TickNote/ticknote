@@ -1,7 +1,20 @@
 export type ItemKind = 'note' | 'todo';
 export type ItemStatus = 'open' | 'done';
 export type ItemSource = 'human' | 'ai';
-export type ListFilter = 'all' | 'todo' | 'note' | 'done';
+export type ListFilter = 'all' | 'todo' | 'note' | 'done' | 'reminders';
+
+export const CONTENT_LIMIT = 2000;
+
+export interface ItemCursor {
+  createdAt: number;
+  id: string;
+}
+
+export interface ItemStats {
+  todayOpenTodos: number;
+  openTodos: number;
+  pendingReminders: number;
+}
 
 export interface Item {
   id: string;
@@ -18,7 +31,7 @@ export interface Item {
 
 export interface ListQuery {
   filter: ListFilter;
-  cursor?: number;
+  cursor?: number | ItemCursor;
   limit?: number;
 }
 
@@ -26,10 +39,16 @@ export interface CreateItemInput {
   content: string;
   kind: ItemKind;
   source?: ItemSource;
+  remindAt?: number | null;
 }
 
 export type ThemePreference = 'system' | 'light' | 'dark';
-export type ExportScope = 'all' | 'todo' | 'note' | 'done' | 'today';
+export type ExportScope = ListFilter | 'today';
+
+export interface BackupResult {
+  path: string;
+  count: number;
+}
 
 export interface ExportResult {
   dir: string;

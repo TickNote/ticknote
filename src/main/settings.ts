@@ -1,6 +1,16 @@
 import { app, nativeTheme, safeStorage } from 'electron';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { z } from 'zod';
 import type { Settings, SettingsPatch } from '../shared/types';
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -16,110 +26,136 @@ export const DEFAULT_SETTINGS: Settings = {
   hotkeyRegistered: true,
   autostartConfigured: false,
 };
-
+const storedSchema = z.object({
+  hotkey: z.string().min(1).max(64).optional(),
+  closeToTrayHintShown: z.boolean().optional(),
+  theme: z.enum(['system', 'light', 'dark']).optional(),
+  hideCaptureOnBlur: z.boolean().optional(),
+  mcpDeleteEnabled: z.boolean().optional(),
+  aiEnabled: z.boolean().optional(),
+  aiBaseUrl: z.string().min(1).max(500).optional(),
+  aiModel: z.string().min(1).max(100).optional(),
+  autostartConfigured: z.boolean().optional(),
+  aiApiKeyEncrypted: z.string().nullable().optional(),
+});
 let settings: Settings = { ...DEFAULT_SETTINGS };
-// AI Key 用 safeStorage 加密后 base64 存 settings.json，不直接落明文
 let aiApiKeyEncrypted: string | null = null;
-
 export function getSettings(): Settings {
-  return settings;
+  return { ...settings };
 }
-
 export function settingsPath(): string {
   return join(app.getPath('userData'), 'settings.json');
 }
 
-export function loadSettings(): Settings {
+function persist(next: Settings, encrypted: string | null): void {
+  mkdirSync(app.getPath('userData'), { recursive: true });
+  const path = settingsPath();
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  const { aiApiKeySet: _keySet, hotkeyRegistered: _registered, ...stored } = next;
   try {
-    const raw = JSON.parse(readFileSync(settingsPath(), 'utf8')) as Partial<Settings> & {
-      aiApiKeyEncrypted?: string | null;
-    };
-    aiApiKeyEncrypted = raw.aiApiKeyEncrypted ?? null;
-    const persisted: Partial<Settings> = { ...raw };
-    delete persisted.aiApiKeySet;
-    delete persisted.hotkeyRegistered;
-    settings = { ...DEFAULT_SETTINGS, ...persisted, aiApiKeySet: Boolean(aiApiKeyEncrypted) };
-  } catch {
-    aiApiKeyEncrypted = null;
-    settings = { ...DEFAULT_SETTINGS };
-  }
-  return settings;
-}
-
-export function saveSettings(): void {
-  try {
-    mkdirSync(app.getPath('userData'), { recursive: true });
-    const persisted: Record<string, unknown> = { ...settings, aiApiKeyEncrypted };
-    delete persisted.aiApiKeySet;
-    delete persisted.hotkeyRegistered;
-    writeFileSync(settingsPath(), JSON.stringify(persisted, null, 2), 'utf8');
-  } catch (error) {
-    console.error('[settings] save failed', error);
-  }
-}
-
-export function decryptAiKey(): string | null {
-  if (!aiApiKeyEncrypted) return null;
-  try {
-    if (aiApiKeyEncrypted.startsWith('plain:')) {
-      return Buffer.from(aiApiKeyEncrypted.slice(6), 'base64').toString('utf8');
+    writeFileSync(temporary, JSON.stringify({ ...stored, aiApiKeyEncrypted: encrypted }, null, 2), {
+      encoding: 'utf8',
+      flush: true,
+    });
+    if (existsSync(path)) {
+      let valid = true;
+      try {
+        const previous = storedSchema.parse(JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')));
+        valid = !previous.aiApiKeyEncrypted?.startsWith('plain:');
+      } catch {
+        valid = false;
+      }
+      if (valid) copyFileSync(path, `${path}.bak`);
     }
-    if (!safeStorage.isEncryptionAvailable()) return null;
-    return safeStorage.decryptString(Buffer.from(aiApiKeyEncrypted, 'base64'));
+    renameSync(temporary, path);
   } catch (error) {
-    console.error('[ai] decrypt key failed', error);
+    try {
+      unlinkSync(temporary);
+    } catch {
+      /* temporary may not exist */
+    }
+    console.error('[settings] save failed', error);
+    throw new Error('设置保存失败，请检查磁盘空间及数据目录权限后重试');
+  }
+}
+export function loadSettings(): Settings {
+  settings = { ...DEFAULT_SETTINGS };
+  aiApiKeyEncrypted = null;
+  for (const path of [settingsPath(), `${settingsPath()}.bak`]) {
+    try {
+      const { aiApiKeyEncrypted: encrypted, ...stored } = storedSchema.parse(
+        JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, '')),
+      );
+      aiApiKeyEncrypted = encrypted ?? null;
+      if (aiApiKeyEncrypted?.startsWith('plain:')) {
+        const legacy = Buffer.from(aiApiKeyEncrypted.slice(6), 'base64').toString('utf8');
+        aiApiKeyEncrypted = safeStorage.isEncryptionAvailable()
+          ? safeStorage.encryptString(legacy).toString('base64')
+          : null;
+      }
+      settings = { ...DEFAULT_SETTINGS, ...stored, aiApiKeySet: Boolean(aiApiKeyEncrypted) };
+      if (path.endsWith('.bak') || encrypted?.startsWith('plain:')) {
+        persist(settings, aiApiKeyEncrypted);
+        if (encrypted?.startsWith('plain:')) copyFileSync(settingsPath(), `${settingsPath()}.bak`);
+      }
+      break;
+    } catch (error) {
+      if (existsSync(path)) console.error('[settings] load/recover failed', error);
+    }
+  }
+  return getSettings();
+}
+export function saveSettings(): void {
+  persist(settings, aiApiKeyEncrypted);
+}
+export function decryptAiKey(): string | null {
+  if (!aiApiKeyEncrypted || !safeStorage.isEncryptionAvailable()) return null;
+  try {
+    return safeStorage.decryptString(Buffer.from(aiApiKeyEncrypted, 'base64'));
+  } catch {
     return null;
   }
 }
-
-function encryptAiKey(key: string): string {
-  if (safeStorage.isEncryptionAvailable()) return safeStorage.encryptString(key).toString('base64');
-  // safeStorage 不可用时降级，前缀标明是明文编码，避免误以为已加密
-  return `plain:${Buffer.from(key, 'utf8').toString('base64')}`;
-}
-
 export interface SettingsHooks {
   onHotkeyChange?: () => void;
 }
-
 export function applySettingsPatch(patch: SettingsPatch, hooks: SettingsHooks = {}): Settings {
-  if (patch.theme !== undefined) settings.theme = patch.theme;
-  if (patch.hideCaptureOnBlur !== undefined) settings.hideCaptureOnBlur = patch.hideCaptureOnBlur;
-  if (patch.mcpDeleteEnabled !== undefined) settings.mcpDeleteEnabled = patch.mcpDeleteEnabled;
-  if (patch.aiEnabled !== undefined) settings.aiEnabled = patch.aiEnabled;
-  if (patch.aiBaseUrl !== undefined) settings.aiBaseUrl = patch.aiBaseUrl;
-  if (patch.aiModel !== undefined) settings.aiModel = patch.aiModel;
-  if (patch.aiApiKey !== undefined) {
-    if (patch.aiApiKey === null || patch.aiApiKey.trim() === '') {
-      aiApiKeyEncrypted = null;
-      settings.aiApiKeySet = false;
-    } else {
-      aiApiKeyEncrypted = encryptAiKey(patch.aiApiKey.trim());
-      settings.aiApiKeySet = true;
+  const { aiApiKey, ...changes } = patch;
+  const next = { ...settings, ...changes };
+  let encrypted = aiApiKeyEncrypted;
+  if (aiApiKey !== undefined) {
+    if (!aiApiKey?.trim()) encrypted = null;
+    else {
+      if (!safeStorage.isEncryptionAvailable())
+        throw new Error('系统加密暂不可用，API Key 未保存，请稍后重试');
+      encrypted = safeStorage.encryptString(aiApiKey.trim()).toString('base64');
     }
+    next.aiApiKeySet = Boolean(encrypted);
   }
-  if (patch.hotkey !== undefined && patch.hotkey !== settings.hotkey) {
-    settings.hotkey = patch.hotkey;
-    hooks.onHotkeyChange?.();
-  }
-  saveSettings();
+  persist(next, encrypted);
+  const hotkeyChanged = settings.hotkey !== next.hotkey;
+  settings = next;
+  aiApiKeyEncrypted = encrypted;
+  if (hotkeyChanged) hooks.onHotkeyChange?.();
   nativeTheme.themeSource = settings.theme;
-  return settings;
+  return getSettings();
 }
-
 export function setHotkeyRegistered(value: boolean): void {
   settings.hotkeyRegistered = value;
 }
-
 export function setAutostartConfigured(): void {
-  settings.autostartConfigured = true;
-  saveSettings();
+  const next = { ...settings, autostartConfigured: true };
+  persist(next, aiApiKeyEncrypted);
+  settings = next;
 }
-
-// 关闭主窗时只提示一次“已常驻托盘”
 export function consumeCloseToTrayHint(): boolean {
   if (settings.closeToTrayHintShown) return false;
-  settings.closeToTrayHintShown = true;
-  saveSettings();
+  const next = { ...settings, closeToTrayHintShown: true };
+  try {
+    persist(next, aiApiKeyEncrypted);
+    settings = next;
+  } catch {
+    /* Still allow hiding the window. */
+  }
   return true;
 }

@@ -22,7 +22,11 @@ function createMockApi(): Api {
     autostartConfigured: false,
   };
   let items: Item[] = [
-    makeItem('和张工确认接口字段，顺便问下周三评审的时间，另外周五的构建包要提前一天给测试，避免又卡在最后', 'note', now - 60 * 1000),
+    makeItem(
+      '和张工确认接口字段，顺便问下周三评审的时间，另外周五的构建包要提前一天给测试，避免又卡在最后',
+      'note',
+      now - 60 * 1000,
+    ),
     makeItem('整理本周延期事项', 'todo', now - 65 * 60 * 1000, 'ai'),
     makeItem('给测试同事发构建包', 'todo', now - 600 * 60 * 1000, 'human', 'done'),
     makeItem('客户反馈的两个小问题', 'note', now - day - 6 * 60 * 60 * 1000),
@@ -59,11 +63,17 @@ function createMockApi(): Api {
     },
     async listItems(query: ListQuery) {
       const limit = query.limit ?? 30;
-      let rows = [...items].sort((a, b) => b.createdAt - a.createdAt);
+      let rows = [...items].sort((a, b) => b.createdAt - a.createdAt || (a.id < b.id ? 1 : -1));
       if (query.filter === 'todo') rows = rows.filter((i) => i.kind === 'todo' && i.status === 'open');
       if (query.filter === 'note') rows = rows.filter((i) => i.kind === 'note');
       if (query.filter === 'done') rows = rows.filter((i) => i.status === 'done');
-      if (query.cursor) rows = rows.filter((i) => i.createdAt < query.cursor!);
+      if (query.filter === 'reminders') rows = rows.filter((i) => i.remindAt !== null && i.status === 'open');
+      const cursor = query.cursor;
+      if (typeof cursor === 'number') rows = rows.filter((i) => i.createdAt < cursor);
+      else if (cursor)
+        rows = rows.filter(
+          (i) => i.createdAt < cursor.createdAt || (i.createdAt === cursor.createdAt && i.id < cursor.id),
+        );
       return rows.slice(0, limit);
     },
     async searchItems(q) {
@@ -113,6 +123,15 @@ function createMockApi(): Api {
       const suffix = scope === 'all' ? '' : `-${scope}`;
       return { dir, files: [`notes-2026-10-29${suffix}.md`], count: items.length };
     },
+    async exportBackup() {
+      return { path: 'mock-backup.json', count: items.length };
+    },
+    async importBackup() {
+      return { path: 'mock-backup.json', count: 0 };
+    },
+    async testAi() {
+      return '浏览器预览不发送 AI 请求，请在桌面应用测试';
+    },
     async completeItem(id) {
       items = items.map((i) =>
         i.id === id ? { ...i, status: 'done', completedAt: Date.now(), updatedAt: Date.now() } : i,
@@ -131,8 +150,11 @@ function createMockApi(): Api {
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       return {
-        todayOpenTodos: items.filter((i) => i.kind === 'todo' && i.status === 'open' && i.createdAt >= todayStart.getTime()).length,
-        pendingReminders: items.filter((i) => i.remindAt && !i.remindedAt).length,
+        openTodos: items.filter((i) => i.kind === 'todo' && i.status === 'open').length,
+        todayOpenTodos: items.filter(
+          (i) => i.kind === 'todo' && i.status === 'open' && i.createdAt >= todayStart.getTime(),
+        ).length,
+        pendingReminders: items.filter((i) => i.remindAt && !i.remindedAt && i.status === 'open').length,
       };
     },
     async getSettings() {

@@ -45,7 +45,7 @@ const settingsPath = join(dirname(dbPath), 'settings.json');
 const repo = openRepo(dbPath);
 const deleteEnabled = readDeleteEnabled(settingsPath);
 
-const server = new McpServer({ name: 'ticknote', version: '0.1.0' });
+const server = new McpServer({ name: 'ticknote', version: '0.1.4' });
 
 const iso = (ts: number | null): string | null => (ts === null ? null : new Date(ts).toISOString());
 
@@ -136,13 +136,13 @@ server.registerTool(
   },
   ({ content, kind, remind_at }) => {
     try {
+      const remindAt = remind_at ? parseIso(remind_at) : null;
       const aiRunId = randomUUID();
       const item = repo.create(
-        { content, kind: (kind as ItemKind | undefined) ?? 'todo', source: 'ai' },
+        { content, kind: (kind as ItemKind | undefined) ?? 'todo', source: 'ai', remindAt },
         'ai',
         aiRunId,
       );
-      if (remind_at) repo.setReminder(item.id, parseIso(remind_at));
       return ok(serialize(repo.get(item.id) ?? item));
     } catch (error) {
       return fail((error as Error).message);

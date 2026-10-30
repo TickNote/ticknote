@@ -7,6 +7,7 @@ export const FILTERS: Array<{ key: ListFilter; label: string }> = [
   { key: 'todo', label: '待办' },
   { key: 'note', label: '便签' },
   { key: 'done', label: '已完成' },
+  { key: 'reminders', label: '提醒' },
 ];
 
 export const KINDS: Array<{ key: ItemKind; label: string }> = [
@@ -80,6 +81,13 @@ export function formatRemindTag(ts: number): string {
   if (key === today) return `提醒 ${formatTime(ts)}`;
   if (key === today + 86_400_000) return `提醒 明天 ${formatTime(ts)}`;
   return `提醒 ${dayLabel(key)} ${formatTime(ts)}`;
+}
+
+export function reminderStatus(item: Item): string {
+  if (item.status === 'done') return '已完成';
+  if (item.remindedAt)
+    return item.remindAt && item.remindedAt - item.remindAt > 60000 ? '已补提醒' : '已提醒';
+  return item.remindAt && item.remindAt <= Date.now() ? '待补提醒' : '待提醒';
 }
 
 const SPECIAL_KEYS: Record<string, string> = {

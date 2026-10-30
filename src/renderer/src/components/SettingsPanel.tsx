@@ -1,4 +1,6 @@
 import type { AutostartStatus, Settings, SettingsPatch } from '../../../shared/types';
+import { useRef } from 'react';
+import { useDialogFocus } from '../hooks';
 
 export interface SettingsPanelProps {
   settings: Settings | null;
@@ -21,6 +23,12 @@ export interface SettingsPanelProps {
   onClearAiKey: () => void;
   onUninstall: () => void;
   onClearAll: () => void;
+  connectionBusy: boolean;
+  connectionHint: string;
+  onTestConnection: () => void;
+  backupBusy: boolean;
+  onBackup: () => void;
+  onRestoreBackup: () => void;
 }
 
 export function SettingsPanel({
@@ -44,12 +52,28 @@ export function SettingsPanel({
   onClearAiKey,
   onUninstall,
   onClearAll,
+  connectionBusy,
+  connectionHint,
+  onTestConnection,
+  backupBusy,
+  onBackup,
+  onRestoreBackup,
 }: SettingsPanelProps) {
+  const panelRef = useRef<HTMLElement>(null);
+  useDialogFocus(panelRef);
   return (
-    <div className="settings-mask" onMouseDown={onClose}>
-      <aside className="settings-panel" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="settings-mask" onClick={onClose}>
+      <aside
+        className="settings-panel"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+        tabIndex={-1}
+        onClick={(event) => event.stopPropagation()}
+      >
         <div className="settings-head">
-          <span>设置</span>
+          <span id="settings-title">设置</span>
           <button type="button" className="icon-btn close-btn" aria-label="关闭设置" onClick={onClose}>
             ×
           </button>
@@ -57,6 +81,7 @@ export function SettingsPanel({
 
         {settings ? (
           <>
+            <div className="settings-divider">常规</div>
             <div className="setting-row">
               <div className="setting-copy">
                 <div className="setting-name">全局热键</div>
@@ -81,6 +106,7 @@ export function SettingsPanel({
               </div>
               <input
                 type="checkbox"
+                aria-label="开机自启"
                 className="setting-check"
                 checked={autostart?.openAtLogin ?? false}
                 onChange={(event) => onToggleAutostart(event.target.checked)}
@@ -96,27 +122,31 @@ export function SettingsPanel({
             <div className="setting-row">
               <div className="setting-copy">
                 <div className="setting-name">浮窗失焦隐藏</div>
-                <div className="setting-desc">点到其他窗口时自动收起浮窗</div>
+                <div className="setting-desc">点到其他窗口时自动收起，重新打开继续编辑草稿</div>
               </div>
               <input
                 type="checkbox"
                 className="setting-check"
                 checked={settings.hideCaptureOnBlur}
+                aria-label="浮窗失焦隐藏"
                 onChange={(event) => onPatch({ hideCaptureOnBlur: event.target.checked })}
               />
             </div>
 
+            <div className="settings-divider">MCP 集成</div>
             <div className="setting-row">
               <div className="setting-copy">
                 <div className="setting-name">MCP 删除工具</div>
                 <div className="setting-desc">
-                  允许 AI 客户端删除记录；默认关闭。修改后重启 Claude/Cursor 等 AI 客户端生效，TickNote 无需重启
+                  允许 AI 客户端删除记录；默认关闭。修改后重启 Claude/Cursor 等 AI 客户端生效，TickNote
+                  无需重启
                 </div>
               </div>
               <input
                 type="checkbox"
                 className="setting-check"
                 checked={settings.mcpDeleteEnabled}
+                aria-label="允许 MCP 删除记录"
                 onChange={(event) => onPatch({ mcpDeleteEnabled: event.target.checked })}
               />
             </div>
@@ -131,6 +161,7 @@ export function SettingsPanel({
                 type="checkbox"
                 className="setting-check"
                 checked={settings.aiEnabled}
+                aria-label="启用 AI 润色"
                 onChange={(event) => onPatch({ aiEnabled: event.target.checked })}
               />
             </div>
@@ -142,7 +173,9 @@ export function SettingsPanel({
                   <input
                     value={aiBaseUrlDraft}
                     onChange={(event) => onChangeAiBaseUrl(event.target.value)}
-                    onBlur={() => onPatch({ aiBaseUrl: aiBaseUrlDraft.trim() || 'https://api.deepseek.com/v1' })}
+                    onBlur={() =>
+                      onPatch({ aiBaseUrl: aiBaseUrlDraft.trim() || 'https://api.deepseek.com/v1' })
+                    }
                     spellCheck={false}
                   />
                 </label>
@@ -163,6 +196,7 @@ export function SettingsPanel({
                       onChange={(event) => onChangeAiKey(event.target.value)}
                       placeholder={settings.aiApiKeySet ? '已设置（留空可保留）' : '未设置'}
                       type="password"
+                      aria-label="AI API Key"
                       spellCheck={false}
                     />
                     <button type="button" className="btn" onClick={onSaveAiKey}>
@@ -177,8 +211,17 @@ export function SettingsPanel({
                 </div>
 
                 <div className="setting-hint">
-                  Key 用 Electron safeStorage 加密后存本机 settings.json；只发送当前这一行文本，不发送历史记录。
+                  Key 用 Electron safeStorage 加密后存本机
+                  settings.json；只发送当前这一行文本，不发送历史记录。
                 </div>
+                <button type="button" className="btn" disabled={connectionBusy} onClick={onTestConnection}>
+                  {connectionBusy ? '测试中…' : '保存配置并测试连接'}
+                </button>
+                {connectionHint && (
+                  <div className="setting-hint" role="status">
+                    {connectionHint}
+                  </div>
+                )}
               </>
             ) : (
               <div className="setting-hint">开启后可配置接口地址、模型与 API Key（Key 加密保存）。</div>
@@ -186,6 +229,18 @@ export function SettingsPanel({
 
             <div className="setting-hint">Windows 勿扰 / 专注助手会静默通知，无法绕过。</div>
 
+            <div className="settings-divider">数据管理</div>
+            <p className="setting-hint">
+              备份包含完整记录、时间和提醒，不包含 API Key。恢复时合并缺失记录，已有内容保持不变。
+            </p>
+            <div className="backup-actions">
+              <button type="button" className="btn" disabled={backupBusy} onClick={onBackup}>
+                备份全部记录
+              </button>
+              <button type="button" className="btn" disabled={backupBusy} onClick={onRestoreBackup}>
+                恢复备份
+              </button>
+            </div>
             <div className="settings-divider">危险操作</div>
             <div className="setting-row">
               <div className="setting-copy">

@@ -1,4 +1,6 @@
-import { app, ipcMain } from 'electron';
+import { app, dialog, ipcMain } from 'electron';
+import { readFileSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import { IPC } from '../shared/ipc';
 import type {
@@ -12,13 +14,9 @@ import type {
   UninstallResult,
 } from '../shared/types';
 import type { Repo } from './db/repo';
+import { backupSchema, itemSchema } from '../shared/validation';
 import { parseNote } from './ai/parse';
-import {
-  applySettingsPatch,
-  decryptAiKey,
-  getSettings,
-  setAutostartConfigured,
-} from './settings';
+import { applySettingsPatch, decryptAiKey, getSettings, setAutostartConfigured } from './settings';
 import { applyWindowBackground, getCaptureWindow, showMainWindow } from './windows';
 
 export interface IpcDependencies {
@@ -72,16 +70,18 @@ export function setupIpc(deps: IpcDependencies): void {
   ipcMain.handle(IPC.itemsList, (_event, payload: unknown) => {
     const query = z
       .object({
-        filter: z.enum(['all', 'todo', 'note', 'done']).default('all'),
-        cursor: z.number().optional(),
-        limit: z.number().min(1).max(50).optional(),
+        filter: z.enum(['all', 'todo', 'note', 'done', 'reminders']).default('all'),
+        cursor: z.union([z.number(), z.object({ createdAt: z.number(), id: z.string().uuid() })]).optional(),
+        limit: z.number().int().min(1).max(50).optional(),
       })
       .parse(payload ?? {}) as ListQuery;
     return repo.list(query);
   });
 
   ipcMain.handle(IPC.itemsSearch, (_event, payload: unknown) => {
-    const input = z.object({ q: z.string().max(200), limit: z.number().min(1).max(50).optional() }).parse(payload);
+    const input = z
+      .object({ q: z.string().max(200), limit: z.number().min(1).max(50).optional() })
+      .parse(payload);
     return repo.search(input.q, input.limit ?? 30);
   });
 
@@ -131,18 +131,6 @@ export function setupIpc(deps: IpcDependencies): void {
 
   // 行内删除的撤销：把完整记录按原 id / 时间写回
   ipcMain.handle(IPC.itemsRestoreDeleted, (_event, payload: unknown) => {
-    const itemSchema = z.object({
-      id: z.string().uuid(),
-      content: z.string().min(1).max(2000),
-      kind: z.enum(['note', 'todo']),
-      status: z.enum(['open', 'done']),
-      remindAt: z.number().int().nonnegative().nullable(),
-      remindedAt: z.number().int().nonnegative().nullable(),
-      createdAt: z.number().int().nonnegative(),
-      updatedAt: z.number().int().nonnegative(),
-      completedAt: z.number().int().nonnegative().nullable(),
-      source: z.enum(['human', 'ai']),
-    });
     const { item } = z.object({ item: itemSchema }).parse(payload);
     const restored = repo.restore(item);
     if (restored) deps.notifyItemsChanged();
@@ -167,9 +155,51 @@ export function setupIpc(deps: IpcDependencies): void {
 
   ipcMain.handle(IPC.exportMarkdown, async (_event, payload: unknown) => {
     const { scope } = z
-      .object({ scope: z.enum(['all', 'todo', 'note', 'done', 'today']).optional() })
+      .object({ scope: z.enum(['all', 'todo', 'note', 'done', 'reminders', 'today']).optional() })
       .parse(payload ?? {});
     return deps.exportNow(scope ?? 'all');
+  });
+
+  ipcMain.handle(IPC.backupExport, async () => {
+    const picked = await dialog.showSaveDialog({
+      title: '备份全部记录',
+      defaultPath: join(app.getPath('documents'), `TickNote-backup-${Date.now()}.json`),
+      filters: [{ name: 'TickNote 备份', extensions: ['json'] }],
+    });
+    if (picked.canceled || !picked.filePath) return null;
+    const items = repo.allForExport();
+    writeFileSync(
+      picked.filePath,
+      JSON.stringify(
+        { format: 'ticknote-backup', version: 1, exportedAt: new Date().toISOString(), items },
+        null,
+        2,
+      ),
+      { encoding: 'utf8', flush: true },
+    );
+    return { path: picked.filePath, count: items.length };
+  });
+
+  ipcMain.handle(IPC.backupImport, async () => {
+    const picked = await dialog.showOpenDialog({
+      title: '恢复备份（合并记录，不覆盖已有内容）',
+      properties: ['openFile'],
+      filters: [{ name: 'TickNote 备份', extensions: ['json'] }],
+    });
+    const path = picked.filePaths[0];
+    if (picked.canceled || !path) return null;
+    if (statSync(path).size > 100 * 1024 * 1024) throw new Error('备份文件过大，请选择小于 100 MB 的文件');
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, 'utf8').replace(/^\uFEFF/, ''));
+    } catch {
+      throw new Error('备份文件无法读取或格式不正确，未导入任何记录');
+    }
+    const data = backupSchema.safeParse(raw);
+    if (!data.success) throw new Error('备份格式不正确，未导入任何记录');
+    const count = repo.importItems(data.data.items);
+    deps.notifyItemsChanged();
+    return { path, count };
   });
 
   ipcMain.handle(IPC.itemsStats, () => {
@@ -188,7 +218,15 @@ export function setupIpc(deps: IpcDependencies): void {
         hideCaptureOnBlur: z.boolean().optional(),
         mcpDeleteEnabled: z.boolean().optional(),
         aiEnabled: z.boolean().optional(),
-        aiBaseUrl: z.string().min(1).max(500).optional(),
+        aiBaseUrl: z
+          .string()
+          .url('请输入有效的 http 或 https 接口地址')
+          .max(500)
+          .refine(
+            (value) => ['http:', 'https:'].includes(new URL(value).protocol),
+            '接口地址必须使用 http 或 https',
+          )
+          .optional(),
         aiModel: z.string().min(1).max(100).optional(),
         aiApiKey: z.string().max(500).nullable().optional(),
       })
@@ -216,6 +254,27 @@ export function setupIpc(deps: IpcDependencies): void {
     return parseWithAi(content);
   });
 
+  ipcMain.handle(IPC.aiTest, async () => {
+    if (!getSettings().aiEnabled) throw new Error('请先启用 AI 润色');
+    const key = decryptAiKey();
+    if (!key) throw new Error('API Key 未设置或无法解密，请重新保存');
+    const settings = getSettings();
+    const response = await fetch(`${settings.aiBaseUrl.replace(/\/+$/, '')}/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model: settings.aiModel,
+        messages: [{ role: 'user', content: '请回复 OK' }],
+        max_tokens: 16,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(`连接失败（HTTP ${response.status}），请检查地址、Key 和模型`);
+    const data = (await response.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    if (!data.choices?.[0]?.message?.content) throw new Error('接口返回格式不兼容，请检查地址和模型');
+    return '连接成功，模型可用';
+  });
+
   ipcMain.handle(IPC.appUninstall, async (): Promise<UninstallResult> => deps.uninstallApp());
 
   ipcMain.on(IPC.captureHide, () => {
@@ -223,7 +282,7 @@ export function setupIpc(deps: IpcDependencies): void {
   });
 
   ipcMain.on(IPC.captureResize, (_event, payload: unknown) => {
-    const height = Math.min(240, Math.max(120, Number(payload) || 150));
+    const height = Math.min(330, Math.max(180, Number(payload) || 240));
     getCaptureWindow()?.setSize(620, Math.round(height), false);
   });
 

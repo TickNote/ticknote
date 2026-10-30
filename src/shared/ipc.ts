@@ -15,6 +15,8 @@ export const IPC = {
   itemsChanged: 'items:changed',
   itemsFocus: 'items:focus',
   exportMarkdown: 'export:markdown',
+  backupExport: 'backup:export',
+  backupImport: 'backup:import',
   captureHide: 'capture:hide',
   captureShown: 'capture:shown',
   captureResize: 'capture:resize',
@@ -24,6 +26,7 @@ export const IPC = {
   autostartGet: 'autostart:get',
   autostartSet: 'autostart:set',
   aiParse: 'ai:parse',
+  aiTest: 'ai:test',
   appUninstall: 'app:uninstall',
   windowOpenMain: 'window:open-main',
 } as const;

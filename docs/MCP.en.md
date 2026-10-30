@@ -99,10 +99,10 @@ Replace the path placeholders with real values: `<用户名>` is your Windows ac
 
 Trae supports two locations; pick one:
 
-| Scope | File | When to use |
-| --- | --- | --- |
-| Project | `<project root>\.trae\mcp.json` | only this project |
-| Global | `%APPDATA%\Trae\User\mcp.json` | reused across projects (Settings → MCP → Open config file shows the real path) |
+| Scope   | File                            | When to use                                                                    |
+| ------- | ------------------------------- | ------------------------------------------------------------------------------ |
+| Project | `<project root>\.trae\mcp.json` | only this project                                                              |
+| Global  | `%APPDATA%\Trae\User\mcp.json`  | reused across projects (Settings → MCP → Open config file shows the real path) |
 
 ```json
 {
@@ -124,10 +124,10 @@ After saving, reload the window (`Developer: Reload Window`) or restart Trae; th
 
 WorkBuddy (Tencent) uses the standard `mcpServers` JSON:
 
-| Scope | File |
-| --- | --- |
-| User | `%USERPROFILE%\.workbuddy\mcp.json` |
-| Project | `<project>\.workbuddy\mcp.json` |
+| Scope   | File                                |
+| ------- | ----------------------------------- |
+| User    | `%USERPROFILE%\.workbuddy\mcp.json` |
+| Project | `<project>\.workbuddy\mcp.json`     |
 
 Or use the UI: sidebar "Plugins" → "MCP Servers" → "Configure MCP", and paste:
 
@@ -243,7 +243,7 @@ Note: the delete switch is read from the `settings.json` in the **directory that
 - **Deletion cannot be undone.** `delete_item` is a hard delete with no recycle bin; enable it only on clients you trust, and only for as long as you need it.
 - **Records leave the machine.** MCP itself does not use the network, but how the AI client uses the record text afterwards — and whether it sends it to a model provider — is decided by that client and its privacy policy. Do not hand sensitive content to an untrusted client.
 - **No authentication layer.** The stdio server runs with the current user's privileges, so any local program that can launch that process can access the database; it listens on no port and offers no remote access.
-- **AI writes are tagged.** `source='ai'` makes them easy to spot in the main window, but MCP writes are not pushed to an already-open main window in real time — switch filters or reopen the window to see them.
+- **AI writes are tagged.** `source='ai'` makes them easy to spot in the main window, the app checks the database version every 2 seconds and automatically refreshes open lists, searches and counts after MCP writes. Returning focus also refreshes data.
 - **Reminders are not shown by MCP.** Due notifications depend on the TickNote main process running (tray resident).
 
 ## Troubleshooting

@@ -1,6 +1,6 @@
 > 中文 | [English](ARCHITECTURE.en.md)
 
-# TickNote 架构说明
+# TickNote 架构说明（0.1.1）
 
 > 面向贡献者的实现级说明。产品/交互的完整规格见仓库根目录的 [DESIGN.md](../DESIGN.md)；MCP 客户端配置见 [MCP.md](MCP.md)。
 
@@ -85,10 +85,12 @@ ticknote/
 │  │     ├─ capture.tsx        # 浮窗：输入 / 类型切换 / AI 润色 / 自适应高度
 │  │     ├─ api.ts             # 渲染层 API 封装；浏览器预览时用 mock
 │  │     ├─ utils.ts           # 日期分组、时间格式化、热键转 accelerator
+│  │     ├─ hooks.ts           # Draft persistence / errors / dialog focus
 │  │     ├─ styles.css         # 两个窗口共用的样式
 │  │     └─ components/        # TopBar / ListItem / Drawer / SettingsPanel / ExportDialog / Toast
 │  ├─ shared/
 │  │  ├─ ipc.ts                # IPC 通道名常量
+│  │  ├─ validation.ts         # Item / versioned backup validation
 │  │  └─ types.ts              # Item / Settings / 查询与结果 DTO
 │  └─ mcp/
 │     └─ server.ts             # stdio MCP server（独立进程入口）
@@ -97,6 +99,8 @@ ticknote/
 ├─ tests/
 │  ├─ repo.test.ts             # 库层：分页 / FTS / 提醒 / 清空
 │  ├─ export.test.ts           # Markdown 导出格式
+│  ├─ reliability.test.ts      # Paging ties / literal search / export / backup restore
+│  ├─ settings.test.ts         # Encryption unavailable / write failure / recovery
 │  └─ ai-parse.test.ts         # AI 润色请求格式与降级
 ├─ scripts/
 │  ├─ test-mcp.ts              # MCP 端到端测试（stdio 客户端 → server.js）
@@ -118,270 +122,75 @@ ticknote/
 
 ## 3. 主进程（`src/main/`）
 
-### 3.1 启动顺序
+### 3.1 启动与刷新
 
-`src/main/index.ts` 是唯一入口，启动流程如下：
+`index.ts` 设置应用名/AUMID、数据目录和单实例锁，完成旧库复制迁移后读取设置、打开 repo，注入 IPC 依赖，创建主窗/浮窗/托盘并注册热键。`--autostart` 仅进托盘；开发模式不写登录启动项。主窗 900×640，最小 720×520，关闭收进托盘，托盘退出才结束进程。
 
-1. `app.setName('TickNote')`，并用 `TICKNOTE_DATA`（兼容旧名 `QUICKNOTE_DATA`）覆盖 `userData`，便于测试隔离。
-2. `app.setAppUserModelId('com.ticknote.app')`——必须与安装快捷方式的 AUMID 一致，否则 Windows toast 不显示。
-3. `requestSingleInstanceLock()`：拿不到锁就退出；第二次启动由 `second-instance` 事件唤起已有主窗。
-4. `whenReady` → `bootstrap()`：
-   - 移除默认菜单（`Menu.setApplicationMenu(null)`）；
-   - `migrateLegacyData(userData)`：做一次幂等迁移（同目录 `quicknote.db` → `ticknote.db`；旧 `%APPDATA%\QuickNote` 目录 → `%APPDATA%\TickNote`）；
-   - 读取 `settings.json`，应用 `nativeTheme.themeSource`；
-   - 安装版首次启动写入开机启动项（`process.defaultApp !== true` 守卫，避免开发模式把 `electron.exe` 写进启动项）；
-   - `openRepo(userData/ticknote.db)` → `setupIpc({repo, ...})`（`ipc.ts`）→ `createMainWindow()` / `createCaptureWindow()`（`windows.ts`）→ `createTray()`（`tray.ts`）→ `registerHotkey()`；
-   - 除非带 `--autostart`，否则显示主窗；
-   - 先 `scanReminders('missed')` 补发错过的提醒，再启动 30 秒轮询。
-5. `before-quit` 调 `markQuitting()`（`windows.ts`）；`will-quit` 清理定时器、注销热键、关闭数据库。
-6. `window-all-closed` 故意留空：托盘常驻，窗口全关也不退出。
+启动时补扫错过提醒，此后每 30 秒扫描；每 2 秒读取 `repo.dataVersion()`（`PRAGMA data_version`），发现 MCP 等外部连接写入时广播 `items:changed` 并刷新统计。跨天也触发刷新。退出清理计时器、热键和数据库。窗口恢复焦点时 renderer 另行重查，包含当前搜索。
 
-`index.ts` 只负责编排；窗口、托盘、IPC、设置各自拆到 `windows.ts`、`tray.ts`、`ipc.ts`、`settings.ts`，互相通过显式传入的依赖或导出的 getter 通信，避免循环引用。
+### 3.2 窗口、托盘、提醒
 
-### 3.2 窗口
+- `windows.ts`：浮窗宽 620，创建高度 150；渲染后通常 242–298，`capture:resize` 主进程限制 180–330。不透明、置顶、无边框；拖动位置在本次运行内记忆并夹回显示器工作区。失焦隐藏可关闭；×/热键/失焦保留草稿，Esc 明确丢弃。
+- `tray.ts`：显示全部未完成待办与待提醒数；不再只统计今天创建的待办。
+- 提醒扫描 `remind_at <= now AND reminded_at IS NULL AND status='open'`，先 `markReminded` 再请求系统通知，避免重复；该标记不是实际送达回执。超过 3 条合并，启动补提醒也合并。点击通知进入「提醒」筛选并打开记录，合并通知打开首条。
 
-|      | 主窗                                                | 浮窗                                                                   |
-| ---- | --------------------------------------------------- | ---------------------------------------------------------------------- |
-| 尺寸 | 900×640，最小 720×520，可缩放                       | 620 宽，高度默认 150，主进程限制 120–240                               |
-| 外观 | 系统标题栏、背景色随主题                            | `frame:false`、`alwaysOnTop`、`skipTaskbar`、`resizable:false`、带阴影 |
-| 关闭 | 拦截 `close` → `hide()`，首次给一次“已收进托盘”气泡 | 渲染层 `×` / `Esc` / 失焦时 `hide()`                                   |
-| 位置 | 系统默认                                            | 首次在鼠标所在显示器居中偏上；拖动后本次运行内记住，并夹回 `workArea`  |
+### 3.3 设置、导出与备份
 
-浮窗不使用 `transparent:true`（Windows 上透明无边框窗口会让中文输入法候选框错位）。拖拽由渲染层的 `-webkit-app-region: drag` 实现，关闭按钮是 `no-drag`。浮窗内容变化时渲染层调用 `capture:resize` 上报高度，主进程做 clamp。
+- `settings.ts` 校验白名单设置，临时文件 flush 后 rename 替换，保留有效旧文件 `.bak`；主文件损坏可恢复。写失败向上抛错，不提交新的内存设置。
+- Key 用 `safeStorage` 加密；加密不可用拒绝保存新 Key。旧 `plain:` 值启动时迁移成密文，无法加密则清除。renderer 只获 `aiApiKeySet`，不获明文或密文。
+- Markdown 范围：`all | todo | note | done | reminders | today`。主窗选择文件夹，托盘使用上次/默认位置；每次创建独立时间戳+随机后缀目录，日期文件不会覆盖以往导出，提醒包含完整本地日期时间。
+- JSON 备份通过系统对话框选择文件；格式 `{format:'ticknote-backup',version:1,exportedAt,items}`。保存全部 `Item` 字段，不含设置、Key、未提交草稿、内部 `ai_run_id`。恢复先完整校验（≤100 MB、≤100000 条），事务插入缺失 id，保留时间且不覆盖已存在记录；失败回滚。每日自动数据库备份尚未实现。
+- 卸载只打开 `process.execPath` 同目录的卸载程序；便携版提示直接删除解压目录，卸载保留 userData。
 
-### 3.3 托盘、热键、提醒
+### 3.4 IPC 与 AI
 
-- **托盘**（`src/main/tray.ts`）：图标是内嵌 base64 PNG，不依赖运行时文件；左键单击显示主窗；右键菜单包含「打开浮窗（显示当前热键）/ 打开主窗 / 今天未完成 N 条（禁用）/ 导出 Markdown / 设置 / 退出」。tooltip 显示今日未完成与待提醒数量。
-- **热键**：默认 `Control+Shift+Space`，存于 `settings.json`。启动与改键时 `globalShortcut.unregisterAll()` 后重新注册；失败仅置 `hotkeyRegistered=false` 并打日志，设置面板据此显示红字，托盘入口兜底。
-- **提醒**：每 30 秒调用 `repo.dueReminders(now)`（`remind_at <= now AND reminded_at IS NULL AND status='open'`），**先** `repo.markReminded()` 落库，**再**弹通知，避免重启重复；同一轮超过 3 条合并为一条；启动时错过的提醒合并成「有 N 条提醒已过期」。点击通知发 `items:focus`，主窗定位并打开抽屉。
+完整通道、入参和返回值见 [DESIGN.md 第 8 节](../DESIGN.md#8-ipc-契约)，精确实现见 `shared/ipc.ts`、`shared/types.ts` 与 `preload/index.ts`。主进程 zod 校验，不信任 renderer。常规增删/状态变化广播刷新；正文编辑与提醒设置由调用方更新界面并刷新托盘。
 
-### 3.4 设置、导出、卸载
+0.1.1 新增 `backup:export`、`backup:import`（返回 `{path,count} | null`，取消为 null）、`ai:test`（返回 string）；`items:restore-deleted` 服务于列表和抽屉的 5 秒撤销。`items:stats` 返回 `{todayOpenTodos,openTodos,pendingReminders}`；`items:list` 支持 reminders 与复合游标。
 
-- `settings.json` 位于 `userData/settings.json`，读写集中在 `src/main/settings.ts`。读取时合并默认值，并区分 `aiApiKeySet`（对外只暴露布尔）与内部的 `aiApiKeyEncrypted`；`applySettingsPatch()` 支持传 `onHotkeyChange` 回调，由 IPC 层注入热键重注册。
-- 导出：`exportMarkdown(repo.allForExport(scope), userData/export)`，按创建日期分文件；scope 为 `all | todo | note | done | today`。
-- 卸载：仅打包版可用。在 `process.execPath` 同目录查找 `Uninstall TickNote.exe`（兼容旧名 `Uninstall QuickNote.exe`），用 `shell.openPath` 打开；开发模式返回 `reason:'dev'`，便携版返回 `reason:'portable'`，由渲染层提示“直接删除解压目录”。
-
-### 3.5 IPC handlers
-
-`setupIpc(deps)` 在 `src/main/ipc.ts` 集中注册；依赖（repo、`notifyItemsChanged`、`refreshTray`、`focusItem`、`exportNow`、`registerHotkey`、`uninstallApp`）通过 `IpcDependencies` 由 `index.ts` 注入，避免循环引用。每个 handler 逐条用 zod 校验入参（字符串长度、uuid 格式、枚举值）。写操作成功后调用 `deps.notifyItemsChanged()`（刷新托盘 + 向主窗发 `items:changed`），渲染层收到后重新拉列表。
-
-完整通道表见 [DESIGN.md 第 8 节](../DESIGN.md#8-ipc-契约)，常用通道：
-
-| 通道                                                   | 方向                    | 入参 → 返回                                                |
-| ------------------------------------------------------ | ----------------------- | ---------------------------------------------------------- |
-| `items:create`                                         | renderer → main         | `{content, kind}` → `Item`                                 |
-| `items:list`                                           | renderer → main         | `{filter, cursor?, limit?}` → `Item[]`（默认 30，最大 50） |
-| `items:search`                                         | renderer → main         | `{q, limit?}` → `Item[]`                                   |
-| `items:get`                                            | renderer → main         | `{id}` → `Item \| null`                                    |
-| `items:update`                                         | renderer → main         | `{id, content}` → `Item \| null`                           |
-| `items:set-kind`                                       | renderer → main         | `{id, kind}` → `Item \| null`                              |
-| `items:complete` / `items:restore`                     | renderer → main         | `{id}` → `Item \| null`                                    |
-| `items:set-reminder`                                   | renderer → main         | `{id, remindAt: number \| null}` → `Item \| null`          |
-| `items:delete`                                         | renderer → main         | `{id}` → `boolean`                                         |
-| `items:clear-all`                                      | renderer → main         | — → `number`（删除条数）                                   |
-| `items:stats`                                          | renderer → main         | — → `{todayOpenTodos, pendingReminders}`                   |
-| `export:markdown`                                      | renderer → main         | `{scope}` → `{dir, files, count}`                          |
-| `settings:get` / `settings:set`                        | renderer → main         | — / `SettingsPatch` → `Settings`                           |
-| `autostart:get` / `autostart:set`                      | renderer → main         | — / `{enabled}` → `AutostartStatus`                        |
-| `ai:parse`                                             | renderer → main         | `{content}` → `{content, kind} \| null`                    |
-| `app:uninstall`                                        | renderer → main         | — → `UninstallResult`                                      |
-| `capture:hide` / `capture:resize` / `window:open-main` | renderer → main（send） | —                                                          |
-| `capture:shown`                                        | main → renderer         | 浮窗每次唤起时重置状态并聚焦                               |
-| `items:changed`                                        | main → renderer         | 记录增删改后刷新主窗                                       |
-| `items:focus`                                          | main → renderer         | `{id}`，点击通知后定位                                     |
-| `settings:open`                                        | main → renderer         | 托盘「设置」打开设置面板                                   |
-
-### 3.6 保存流程
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as 用户
-    participant C as capture.tsx
-    participant P as preload
-    participant M as main
-    participant R as repo.ts
-    participant D as SQLite
-    participant W as main.tsx
-
-    U->>M: Ctrl+Shift+Space（globalShortcut）
-    M->>M: 定位浮窗 → show → focus
-    M-->>C: capture:shown（清空输入、聚焦）
-    U->>C: 输入 + Enter
-    C->>P: api.createItem({content, kind})
-    P->>M: invoke items:create
-    M->>M: zod 校验
-    M->>R: repo.create(input)
-    R->>D: INSERT INTO items（FTS 触发器同步）
-    M-->>W: items:changed
-    M->>M: 刷新托盘计数
-    C->>P: api.hideCapture()
-    P->>M: send capture:hide
-    M->>M: captureWindow.hide()
-```
-
-注意：**MCP 进程的写入不会触发 `items:changed`**（没有跨进程事件）。主窗只在自身 IPC 写操作、筛选切换或重新挂载时刷新。
-
----
+`ai:parse`：启用后只在点击时调用，当前输入 ≤2000 字符，3 秒超时，失败返回 null。`ai:test`：已保存配置、固定句「请回复 OK」、10 秒超时，不发送记录。HTTP/model/key 错误向界面反馈。
 
 ## 4. Preload（`src/preload/index.ts`）
 
-只做一件事：`contextBridge.exposeInMainWorld('api', api)`。暴露的是显式白名单方法，渲染层拿不到 `ipcRenderer`，也无法指定任意通道名。
-
-- 方法名与通道一一对应：`createItem`、`listItems`、`searchItems`、`getItem`、`completeItem`、`restoreItem`、`updateItem`、`setItemKind`、`deleteItem`、`clearAllItems`、`setReminder`、`exportMarkdown`、`stats`、`getSettings`、`updateSettings`、`setTheme`、`getAutostart`、`setAutostart`、`aiParse`、`uninstallApp`、`hideCapture`、`resizeCapture`、`openMain`。
-- 事件订阅返回取消函数：`onCaptureShown`、`onItemsChanged`、`onItemsFocus`、`onOpenSettings`。
-- `export type Api = typeof api`，渲染层据此获得完整类型（`src/renderer/src/api.ts` 导入该类型）。
-
----
+`contextBridge.exposeInMainWorld('api', api)` 仅暴露具名方法，不暴露 ipcRenderer 或任意通道。订阅 `onCaptureShown`、`onItemsChanged`、`onItemsFocus`、`onOpenSettings` 均返回取消函数。`Api = typeof api` 为 renderer 和浏览器 mock 提供一致类型；备份方法为 `exportBackup/importBackup`，连接测试为 `testAi`。
 
 ## 5. 渲染层（`src/renderer/`）
 
-- React 19 + `react-dom/client`，无路由、无状态库；窗口状态用 `useState` / `useEffect`，持久化只用到 `localStorage`（折叠分组 `ticknote.collapsedDays`）。
-- 两个 HTML 入口分别加载 `src/main.tsx`、`src/capture.tsx`，共用 `styles.css`；构建由 `electron.vite.config.ts` 的 `renderer.build.rollupOptions.input` 声明。
-- 视图按组件拆分在 `src/renderer/src/components/`：`TopBar`（搜索、`⋯` 菜单、设置入口）、`ListItem`（行卡片）、`Drawer`（详情抽屉）、`SettingsPanel`（设置面板）、`ExportDialog`（导出范围）、`Toast`（轻提示）；日期分组、时间格式化与热键转 accelerator 在 `src/renderer/src/utils.ts`。
-- `src/renderer/src/api.ts` 在 `window.api` 存在时直接用 preload API；不存在时（浏览器里静态预览）用内置 mock 数据。若 `navigator.userAgent` 是 Electron 但 `window.api` 缺失，直接抛错提示 preload 未加载。
-- 主窗关键交互：
-  - 搜索输入 150ms 防抖后调用 `items:search`；清空搜索回落到 `items:list`。
-  - 分组按创建日期计算，组头可折叠并写入 `localStorage`。
-  - 键盘：`Ctrl+N` 聚焦输入框；`↑`/`↓` 移动选中行，`Enter` 打开抽屉；`Esc` 按「导出弹窗 → 设置 → 搜索 → 抽屉」顺序退出。
-  - 抽屉里可编辑正文（失焦保存）、切换类型、设/清提醒、完成/恢复、复制、二次确认删除，并有上一条/下一条。
-  - 导出弹窗选择范围（全部 / 当前筛选 / 仅今天）。
-- 浮窗关键交互：自适应高度（最高 96px 内部滚动，并把总高度上报主进程）、`Enter` 提交（输入法组合态不提交）、`Esc` 隐藏、`Shift+Enter` 换行、开头 200ms 丢弃空格（防热键尾键漏入）、提示 900ms 后自动隐藏、AI 润色回显与撤销。
-
----
+- React 19，主窗与浮窗两个 HTML 入口，共用样式与组件；Electron 缺失 preload 时快速报错，纯浏览器预览使用 mock。
+- `hooks.ts` 管理草稿、可读错误和弹层焦点。主窗/浮窗草稿、逐条编辑草稿、分组折叠和抽屉宽度存 localStorage。草稿未入库，不包含在记录备份中。
+- 主窗五个筛选：全部/待办/便签/已完成/提醒。提醒筛选含未完成且设提醒的记录（包含已经提醒）。统计使用全部未完成待办。按创建日期分组、可折叠；刷新重载已加载的页数并独立保留选中记录。查询代数防止旧结果覆盖新筛选。
+- 搜索 150ms 防抖，覆盖全部记录，不叠加当前筛选；最多 50 条，达到上限提示缩小关键词；变更、外部写入和恢复焦点会重查。
+- 浮窗保存成功清空草稿并约 450ms 后隐藏；新编辑/唤起取消旧计时器；提交锁避免连续 Enter 重复。输入法组合期间不提交；Shift+Enter 换行。
+- AI 请求与草稿/会话版本绑定，过期结果忽略；撤销同时恢复原文与类型。
+- 详情正文失焦或 Ctrl+Enter 保存；关闭、导航、切类型/状态前等待保存，失败保留并可重试。头尾固定，中间滚动；≤780px 使用约 420px 覆盖抽屉，宽窗上限 min(560px,50vw)。自定义提醒需「应用」且未来时间；复制当前草稿有反馈。
+- 列表和详情删除统一 5 秒撤销；MCP 硬删除、清空全部不走该撤销。设置/导出对话框包含焦点约束与返回焦点、标签和键盘操作。
 
 ## 6. 共享契约（`src/shared/`）
 
-| 文件                  | 内容                                                                                                                                                                                                                               |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/shared/ipc.ts`   | `IPC` 常量对象，所有通道名的唯一来源；main / preload 都从这里引用，禁止写字符串字面量                                                                                                                                              |
-| `src/shared/types.ts` | `Item`、`ItemKind`、`ItemStatus`、`ItemSource`、`ListFilter`、`ListQuery`、`CreateItemInput`、`Settings`、`SettingsPatch`、`AutostartStatus`、`AiParseResult`、`ExportScope`、`ExportResult`、`UninstallResult`、`ThemePreference` |
+- `ipc.ts`：所有通道常量。
+- `types.ts`：Item、ItemCursor、ItemStats、Settings、BackupResult 等；正文上限 `CONTENT_LIMIT=2000`。
+- `validation.ts`：备份版本及 Item schema，与删除恢复校验复用。
 
-新增或修改 IPC 时，先改这两个文件，再改 main 与 preload，最后改渲染层——这样 TypeScript 会在编译期指出所有需要同步的位置。
-
----
+修改契约需同步 main/preload/renderer/mock，并通过 typecheck。
 
 ## 7. 数据库
 
-### 7.1 连接与位置
-
-- 使用 Electron / Node 内置的 `node:sqlite`（`DatabaseSync`），没有第三方依赖，也没有原生模块编译。
-- `openRepo()` 执行：`mkdirSync(dirname(dbPath))` → `new DatabaseSync(dbPath)` → `PRAGMA journal_mode = WAL` → `busy_timeout = 3000` → `synchronous = NORMAL` → 迁移。
-- 主进程数据库路径：`join(app.getPath('userData'), 'ticknote.db')`，即 `%APPDATA%\TickNote\ticknote.db`（可用 `TICKNOTE_DATA` 改 `userData`）。
-- MCP 进程自行解析路径（优先级）：`TICKNOTE_DB` → `TICKNOTE_DATA`（兼容 `QUICKNOTE_DATA`）下的 `ticknote.db`（若只有旧的 `quicknote.db` 则用它）→ `%APPDATA%\TickNote\ticknote.db` → 同目录旧文件名 → `%APPDATA%\QuickNote\quicknote.db` → `~/.ticknote/ticknote.db`。
-- 主进程启动时还会做一次幂等迁移，把旧文件名 / 旧目录复制到 `%APPDATA%\TickNote\ticknote.db`。
-
-### 7.2 表结构与索引
-
-`src/main/db/schema.ts` 的 DDL（节选）：
-
-```sql
-CREATE TABLE IF NOT EXISTS items (
-  id           TEXT PRIMARY KEY,
-  content      TEXT NOT NULL,
-  kind         TEXT NOT NULL DEFAULT 'note' CHECK (kind IN ('note','todo')),
-  status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
-  remind_at    INTEGER,
-  reminded_at  INTEGER,
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL,
-  completed_at INTEGER,
-  source       TEXT NOT NULL DEFAULT 'human' CHECK (source IN ('human','ai')),
-  ai_run_id    TEXT
-);
-
-CREATE INDEX idx_items_created ON items(created_at);
-CREATE INDEX idx_items_remind  ON items(remind_at) WHERE remind_at IS NOT NULL;
-CREATE INDEX idx_items_status  ON items(status, created_at);
-```
-
-- 时间统一存 UTC 毫秒，展示时转本地时区；分组只按 `created_at`，`remind_at` 不参与排序。
-- `ai_run_id` 由 MCP 的 `create_item` 写入（每次调用一个 UUID），用于标识 AI 写入批次。
-
-### 7.3 全文搜索
-
-```sql
-CREATE VIRTUAL TABLE items_fts USING fts5(
-  content, content='items', content_rowid='rowid', tokenize='trigram'
-);
-```
-
-配 `AFTER INSERT / AFTER DELETE / AFTER UPDATE` 三个触发器同步索引。`repo.search()` 的规则：
-
-- 查询串 ≥ 3 字符：走 `items_fts MATCH`；先剔除 FTS 语法字符并作为短语匹配，抛错时回退 `LIKE`。
-- 查询串 < 3 字符：直接 `LIKE '%q%'`（数据量小，够用）。
-
-`trigram` 是中文能命中的关键——默认分词器对中文基本无效。
-
-### 7.4 迁移
-
-`migrate()` 读取 `PRAGMA user_version`，小于 `SCHEMA_VERSION`（当前为 `1`）时在一个事务里执行 DDL 并写入新版本号。升级 schema 时**追加**迁移分支、递增 `SCHEMA_VERSION`，不要修改已发布的 DDL。
-
-### 7.5 Repo 接口
-
-`Repo` 接口（`src/main/db/repo.ts`）包含：`create`、`list`、`listRange`、`search`、`get`、`setStatus`、`updateContent`、`update`、`remove`、`clearAll`、`setReminder`、`dueReminders`、`markReminded`、`allForExport`、`stats`、`close`。
-
-其中几条易踩的规则：
-
-- `setReminder` / `update({remindAt})` 必须同时把 `reminded_at` 置 NULL，否则改到未来也不会再提醒。
-- `update({status:'done'})` 同步写 `completed_at`；改回 `open` 时清空。
-- 完成不改变位置：列表始终按 `created_at` 倒序，已完成项靠样式区分。
-- `remove` 是硬删除（无回收站）；`clearAll` 返回删除条数。
-
----
+- `repo.ts` 为唯一数据访问层；`schema.ts` DDL 随包编译。`node:sqlite`，WAL、busy_timeout=3000、synchronous=NORMAL；schema 版本仍为 1，兼容 0.1.0，无应用层“冲突自动重试一次”。
+- 时间 UTC 毫秒；列表 `(created_at DESC,id DESC)`，游标 `{createdAt,id}`，边界被删仍续页，数字游标仅兼容。完成、提醒均不改变创建时间分组。
+- FTS5 trigram：≥3 字符把双引号转义后按完整短语查询，不剥掉路径、URL、括号；短词走转义 LIKE（含 `%/_/反斜线`）；触发器同步增改删。
+- 设置提醒清空 reminded_at；完成写 completed_at、恢复清空。MCP 先验证提醒再一次 INSERT，非法时间不产生半成品。
+- Repo 包含 create/list/listRange/search/get/setStatus/updateContent/update/remove/restore/clearAll/importItems/setReminder/dueReminders/markReminded/allForExport/stats/dataVersion/close，以及底层 db。importItems 事务合并，仅主键冲突跳过，其他错误回滚。
+- 新迁移应追加分支并递增 SCHEMA_VERSION，不能修改已发布 DDL。
 
 ## 8. 安全模型
 
-| 项                 | 现状                                                                                                                     |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------ |
-| `contextIsolation` | **开启**，渲染层无法访问 Node / Electron 内部对象                                                                        |
-| `nodeIntegration`  | **关闭**                                                                                                                 |
-| `sandbox`          | **开启**（两个窗口都设置 `sandbox: true`；preload 只用 `contextBridge` + `ipcRenderer`，无需 Node）                      |
-| 渲染层来源         | 只加载本地文件（`loadFile`）或开发期 `ELECTRON_RENDERER_URL`；`hardenWindow()` 拒绝新窗、阻止 `will-navigate`            |
-| CSP                | 两个 HTML 入口都带最小化 CSP meta（见下）                                                                                |
-| IPC 入参           | 主进程侧 zod 校验（长度、uuid、枚举），渲染层不被信任                                                                    |
-| 渲染层能力         | 仅 `window.api` 白名单方法；通道名来自 `shared/ipc.ts`，无法自定义                                                       |
-| AI Key             | `safeStorage.encryptString()` 后 base64 存入 `settings.json` 的 `aiApiKeyEncrypted`；渲染层只能读到 `aiApiKeySet` 布尔值 |
-| AI Key 降级        | `safeStorage.isEncryptionAvailable()` 为 false 时写入 `plain:<base64>` 前缀（明确标注未加密），避免假装已加密            |
-| 数据库             | 仅在主进程 / MCP 进程打开，WAL + `busy_timeout` 支持并发                                                                 |
-| 单实例             | `requestSingleInstanceLock`，避免两个实例同时写库                                                                        |
-| 卸载               | 只打开安装目录内的卸载程序，路径来自 `process.execPath` 同目录，不接受渲染层传入                                         |
-| MCP 删除           | `delete_item` 默认不注册；开启后也要求 `confirm: true` 硬删除                                                            |
-| 菜单               | `Menu.setApplicationMenu(null)`，无默认菜单与开发者快捷键入口                                                            |
-
-`src/main/windows.ts` 的 `hardenWindow()` 对两个窗口统一做两件事：
-
-```ts
-win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-win.webContents.on('will-navigate', (event) => event.preventDefault());
-```
-
-CSP 写在 `src/renderer/main.html` 与 `src/renderer/capture.html` 的 `<meta http-equiv="Content-Security-Policy">` 中：
-
-```
-default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
-img-src 'self' data:; font-src 'self'; connect-src 'self' ws:;
-object-src 'none'; base-uri 'none'; form-action 'none'
-```
-
-- `connect-src 'self' ws:` 留给开发期 Vite HMR；生产构建不会发起任何网络请求（AI 调用在主进程发起，不受渲染层 CSP 限制）。
-- `'unsafe-inline'` 是为 Vite 注入与组件内联样式保留的折中；后续如需收紧，可评估去掉并在构建阶段处理内联样式。
-
----
+两个窗口均 `contextIsolation:true`、`nodeIntegration:false`、`sandbox:true`。`hardenWindow` 禁止新窗和导航。CSP 限本地资源，保留开发 HMR 的 ws 与内联样式；AI 网络请求仅由主进程在用户操作时发起。DB/草稿/导出均为本地明文，Key 单独系统加密。IPC 白名单、zod 校验；MCP 删除默认关闭且要求 confirm=true。没有云端、遥测、自动更新或后台联网。
 
 ## 9. MCP 进程模型
 
-- `src/mcp/server.ts` 只用 `@modelcontextprotocol/sdk` 的 `McpServer` + `StdioServerTransport`，组合 `repo.ts`。**不加载**任何窗口 / 托盘 / Electron UI 模块，因此可以脱离 App 运行。
-- 构建：`npm run build:mcp` 用 esbuild 打成单文件 CJS `resources/mcp/server.js`（SDK 与 repo 一并内联）；该文件在 `.gitignore` 中，不入库。
-- 打包：`electron-builder.yml` 的 `extraResources` 把 `resources/mcp` 复制到安装目录 `resources\mcp`，**不压进 asar**，保证可被外部进程执行。
-- 启动：AI 客户端用安装目录里的 `TickNote.exe`，通过环境变量 `ELECTRON_RUN_AS_NODE=1` 以 Node 模式执行 `server.js`；用户无需另装 Node。
-- 删除开关：进程启动时读取**数据库同目录**的 `settings.json`，只有 `mcpDeleteEnabled === true` 才注册 `delete_item`。MCP 进程由各客户端各自拉起，所以改开关后需重启客户端。
-- 并发：与主进程相同的 WAL + `busy_timeout=3000`；单次调用只写一条记录，冲突时依赖 SQLite 的忙等待重试。
-- 限制：`limit ≤ 50`，`content ≤ 2000` 字符，`update_item` 的 ISO 时间非法时返回错误文本而不是抛异常。
+独立 stdio 进程，仅依赖 SDK 和 repo，不加载窗口模块。esbuild 产物 `resources/mcp/server.js` 用 extraResources 放在 asar 外；客户端以 `ELECTRON_RUN_AS_NODE=1` 调 TickNote.exe，无需另装 Node，App 关闭仍可读写。
 
-详见 [MCP.md](MCP.md)。
-
----
+数据库解析优先 `TICKNOTE_DB`，其次 `TICKNOTE_DATA`（兼容 QUICKNOTE_DATA），再默认 AppData 路径与旧库回退。删除开关来自数据库同目录 settings.json，修改后重启客户端。默认 5 工具，开启删除为 6；limit≤50、正文≤2000。source=ai 已标记，ai_run_id 已写入，但按批次撤销尚未实现。MCP 不发通知，通知依赖 App 运行。客户端配置见 [MCP.md](MCP.md)。
 
 ## 10. 扩展指南
 
@@ -416,11 +225,11 @@ object-src 'none'; base-uri 'none'; form-action 'none'
 
 ---
 
-## 11. 已知限制（有意为之）
+## 11. 已知限制
 
-- **仅 Windows**：托盘、toast、NSIS 安装包都是 Windows 实现，没有 macOS / Linux 分支。
-- **无实时跨进程通知**：MCP 写入后主窗不会自动刷新（见 3.6）。
-- **无回收站**：删除不可撤销，只有二次确认。
-- **无云同步 / 账号 / 富文本**：数据库单文件即唯一数据源，靠导出 Markdown 兜底。
-- **AI 只做润色**：不解析日期、不自动落库，失败保留原文。
-- **未签名**：构建产物未做代码签名，SmartScreen 会提示未知发布者。
+- 仅 Windows，无云同步、账号、富文本或后台联网。
+- MCP 刷新有约 2 秒轮询延迟，不是实时推送。
+- GUI 单条删除只有 5 秒撤销，无长期回收站；MCP 删除/清空全部不可通过此操作撤销。
+- 每日自动数据库备份、AI 批次撤销尚未实现；当前提供手动 JSON 记录备份。
+- 通知受系统设置影响，标记已提醒不等于送达；AI 只润色，不解析日期或自动落库。
+- 安装包未签名；安装、自启、通知、输入法与多屏仍需实机人工验证，见 [验证指南](VALIDATION-0.1.1.md)。

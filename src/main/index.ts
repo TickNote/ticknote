@@ -7,12 +7,7 @@ import type { ExportResult, ExportScope, Item, UninstallResult } from '../shared
 import { openRepo, type Repo } from './db/repo';
 import { exportMarkdown } from './export/markdown';
 import { setupIpc } from './ipc';
-import {
-  getSettings,
-  loadSettings,
-  setAutostartConfigured,
-  setHotkeyRegistered,
-} from './settings';
+import { getSettings, loadSettings, setAutostartConfigured, setHotkeyRegistered } from './settings';
 import { createTray, getTray, refreshTray } from './tray';
 import {
   createCaptureWindow,
@@ -33,6 +28,7 @@ app.setAppUserModelId('com.ticknote.app');
 
 let repo: Repo;
 let reminderTimer: NodeJS.Timeout | null = null;
+let refreshTimer: NodeJS.Timeout | null = null;
 // 上次导出目录（本次运行内记忆）；首次默认 userData/export
 let lastExportDir: string | null = null;
 
@@ -168,7 +164,7 @@ function showReminder(items: Item[], mode: 'normal' | 'missed'): void {
       title: '待办便签提醒',
       body: `有 ${items.length} 条提醒已过期，打开主窗查看。`,
     });
-    notice.on('click', () => showMainWindow());
+    notice.on('click', () => focusItem(items[0].id));
     notice.show();
     return;
   }
@@ -183,7 +179,7 @@ function showReminder(items: Item[], mode: 'normal' | 'missed'): void {
       title: '待办便签提醒',
       body: `${head} 等 ${items.length} 条`,
     });
-    notice.on('click', () => showMainWindow());
+    notice.on('click', () => focusItem(items[0].id));
     notice.show();
     return;
   }
@@ -234,10 +230,29 @@ function bootstrap(): void {
     } catch (error) {
       console.error('[autostart] initial enable failed', error);
     }
-    setAutostartConfigured();
+    try {
+      setAutostartConfigured();
+    } catch (error) {
+      console.error('[autostart] settings not saved', error);
+    }
   }
 
   repo = openRepo(join(app.getPath('userData'), 'ticknote.db'));
+  let dataVersion = repo.dataVersion();
+  let day = new Date().toDateString();
+  refreshTimer = setInterval(() => {
+    try {
+      const currentVersion = repo.dataVersion();
+      const currentDay = new Date().toDateString();
+      if (currentVersion !== dataVersion || currentDay !== day) {
+        dataVersion = currentVersion;
+        day = currentDay;
+        notifyItemsChanged();
+      }
+    } catch (error) {
+      console.error('[refresh] external change check failed', error);
+    }
+  }, 2000);
 
   createMainWindow();
   createCaptureWindow();
@@ -286,6 +301,7 @@ app.on('before-quit', () => {
 
 app.on('will-quit', () => {
   if (reminderTimer) clearInterval(reminderTimer);
+  if (refreshTimer) clearInterval(refreshTimer);
   globalShortcut.unregisterAll();
   repo?.close();
 });
