@@ -26,7 +26,7 @@ export interface IpcDependencies {
   notifyItemsChanged: () => void;
   refreshTray: () => void;
   focusItem: (id: string) => void;
-  exportNow: (scope?: ExportScope) => ExportResult;
+  exportNow: (scope?: ExportScope, interactive?: boolean) => Promise<ExportResult | null>;
   registerHotkey: () => void;
   uninstallApp: () => Promise<UninstallResult>;
 }
@@ -145,7 +145,7 @@ export function setupIpc(deps: IpcDependencies): void {
     return item;
   });
 
-  ipcMain.handle(IPC.exportMarkdown, (_event, payload: unknown) => {
+  ipcMain.handle(IPC.exportMarkdown, async (_event, payload: unknown) => {
     const { scope } = z
       .object({ scope: z.enum(['all', 'todo', 'note', 'done', 'today']).optional() })
       .parse(payload ?? {});

@@ -421,7 +421,11 @@ export function App() {
     async (scope: ExportScope = 'all') => {
       try {
         const result = await api.exportMarkdown(scope);
-        showToast(`已导出 ${result.count} 条记录，共 ${result.files.length} 个文件`);
+        if (!result) {
+          showToast('已取消导出');
+          return;
+        }
+        showToast(`已导出 ${result.count} 条到 ${result.dir}`);
       } catch {
         showToast('导出失败，请重试');
       }

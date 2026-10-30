@@ -1,4 +1,5 @@
-import { app, globalShortcut, Menu, nativeTheme, Notification, shell } from 'electron';
+import { app, dialog, globalShortcut, Menu, nativeTheme, Notification, shell } from 'electron';
+import type { OpenDialogOptions } from 'electron';
 import { copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { IPC } from '../shared/ipc';
@@ -32,6 +33,8 @@ app.setAppUserModelId('com.ticknote.app');
 
 let repo: Repo;
 let reminderTimer: NodeJS.Timeout | null = null;
+// 上次导出目录（本次运行内记忆）；首次默认 userData/export
+let lastExportDir: string | null = null;
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -103,8 +106,28 @@ async function uninstallApp(): Promise<UninstallResult> {
   return { available: true, opened: error === '', reason: error === '' ? 'opened' : 'error' };
 }
 
-function exportNow(scope: ExportScope = 'all'): ExportResult {
-  return exportMarkdown(repo.allForExport(scope), join(app.getPath('userData'), 'export'));
+// 主窗导出先弹文件夹选择框；托盘快捷导出直接写到上次目录，减少打断
+async function exportNow(scope: ExportScope = 'all', interactive = true): Promise<ExportResult | null> {
+  const defaultDir = lastExportDir ?? join(app.getPath('userData'), 'export');
+  let target = defaultDir;
+
+  if (interactive) {
+    const options: OpenDialogOptions = {
+      title: '选择 Markdown 导出目录',
+      buttonLabel: '导出到这里',
+      defaultPath: defaultDir,
+      properties: ['openDirectory', 'createDirectory'],
+    };
+    const parent = getMainWindow();
+    const picked = parent
+      ? await dialog.showOpenDialog(parent, options)
+      : await dialog.showOpenDialog(options);
+    if (picked.canceled || !picked.filePaths[0]) return null;
+    target = picked.filePaths[0];
+  }
+
+  lastExportDir = target;
+  return exportMarkdown(repo.allForExport(scope), target);
 }
 
 function registerHotkey(): void {

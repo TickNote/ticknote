@@ -30,7 +30,7 @@ const api = {
   clearAllItems: (): Promise<number> => ipcRenderer.invoke(IPC.itemsClearAll),
   setReminder: (id: string, remindAt: number | null): Promise<Item | null> =>
     ipcRenderer.invoke(IPC.itemsSetReminder, { id, remindAt }),
-  exportMarkdown: (scope: ExportScope = 'all'): Promise<ExportResult> =>
+  exportMarkdown: (scope: ExportScope = 'all'): Promise<ExportResult | null> =>
     ipcRenderer.invoke(IPC.exportMarkdown, { scope }),
   stats: (): Promise<{ todayOpenTodos: number; pendingReminders: number }> =>
     ipcRenderer.invoke(IPC.itemsStats),

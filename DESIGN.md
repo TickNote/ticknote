@@ -191,9 +191,10 @@ CREATE VIRTUAL TABLE items_fts USING fts5(
 
 ### 6.5 导出 Markdown
 
-- 路径：`export/notes-YYYY-MM-DD.md`，按创建日期分文件。
+- 命名：`notes-YYYY-MM-DD.md`，按创建日期分文件。
+- 位置：主窗导出时弹系统「选择文件夹」对话框，默认上次使用的目录（首次为 `%APPDATA%\TickNote\export`）；取消则不写文件。托盘「导出 Markdown」不弹框，直接写到上次/默认目录。
 - 待办格式：`- [ ] 内容`（有提醒时追加 `提醒 18:00`），已完成 `- [x]`。
-- 入口：主窗顶部「导出」按钮（导出后 toast 提示条数/文件数）+ 托盘菜单「导出 Markdown」（导出后气泡提示）。
+- 入口：主窗 `⋯` →「导出 Markdown」（范围弹窗 + 文件夹选择，完成后 toast 显示条数与目标目录）+ 托盘菜单「导出 Markdown」（气泡提示条数与目录）。
 - 每次导出覆盖目标文件（幂等），不做实时双向同步。
 
 ---

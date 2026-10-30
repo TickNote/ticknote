@@ -10,7 +10,7 @@ const TRAY_ICON =
 
 let tray: Tray | null = null;
 let repoRef: Repo | null = null;
-let exportNowRef: ((scope?: ExportScope) => ExportResult) | null = null;
+let exportNowRef: ((scope?: ExportScope, interactive?: boolean) => Promise<ExportResult | null>) | null = null;
 let openSettingsRef: (() => void) | null = null;
 
 function buildTrayMenu(): Menu {
@@ -31,13 +31,14 @@ function buildTrayMenu(): Menu {
   ]);
 }
 
-function exportFromTray(): void {
+async function exportFromTray(): Promise<void> {
   try {
-    const result = exportNowRef?.('all');
+    // 托盘是快捷入口，不弹文件夹选择，直接写到上次/默认导出目录
+    const result = await exportNowRef?.('all', false);
     if (!result) return;
     tray?.displayBalloon({
       title: '待办便签',
-      content: `已导出 ${result.count} 条记录，共 ${result.files.length} 个文件`,
+      content: `已导出 ${result.count} 条记录到 ${result.dir}`,
       iconType: 'info',
     });
   } catch (error) {
@@ -57,7 +58,7 @@ export function refreshTray(): void {
 
 export function createTray(options: {
   repo: Repo;
-  exportNow: (scope?: ExportScope) => ExportResult;
+  exportNow: (scope?: ExportScope, interactive?: boolean) => Promise<ExportResult | null>;
   openSettingsPage: () => void;
 }): Tray {
   repoRef = options.repo;

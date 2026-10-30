@@ -43,6 +43,7 @@ export function ExportDialog({ filter, exportScope, onChangeScope, onCancel, onC
           />
           <span>仅今天</span>
         </label>
+        <div className="modal-hint">点「导出」后会弹出文件夹选择框，默认上次使用的目录。</div>
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onCancel}>
             取消

@@ -675,6 +675,12 @@ textarea {
   accent-color: var(--brand);
 }
 
+.modal-hint {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .modal-actions {
   display: flex;
   justify-content: flex-end;
