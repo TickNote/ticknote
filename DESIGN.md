@@ -394,7 +394,7 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 | 输入法候选框错位 | 透明无边框窗口 + 中文输入 | 不使用 `transparent`，用不透明圆角窗口 | 微软拼音、搜狗实机输入中文观察候选框位置 |
 | 热键被占用 | 与微信/QQ/输入法/PowerToys 冲突 | 提示 + 设置页改键 + 托盘兜底 | 故意用系统已占用组合测试注册失败路径 |
 | 多显示器定位错误 | 缩放比例不同 / 副屏在左侧 | `getDisplayNearestPoint` + 按 workArea 居中 | 双屏不同 DPI 下热键唤起 |
-| `node:sqlite` 实验性 API | Electron 升级后行为变化 | 锁定 Electron 版本，SQL 全部隔离在 repo 层 | 升级前跑 `npm run test:db` |
+| `node:sqlite` 实验性 API | Electron 升级后行为变化 | 锁定 Electron 版本，SQL 全部隔离在 repo 层 | 升级前跑 `npm test` |
 | 多进程写冲突 | App 与 MCP 同时写入 | WAL + busy_timeout + 单条事务 | 脚本并发写 100 条断言无丢失 |
 | 中文搜索失效 | 使用默认分词器 | FTS5 `trigram` | 搜“周报”“会议”命中 |
 | 包内 MCP 不可执行 | 被压进 asar / 依赖解析失败 | esbuild 单文件 + `extraResources` 放到 `resources\mcp` | 按 9.2 配置在 Cursor 里调用一次 |
@@ -494,7 +494,7 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 ### UI 优化验证记录（2026-10-30，v1.7）
 
 已自动验证：
-- 类型检查、构建通过；`test:db` 新增清空断言：`clearAll()` 返回删除条数、列表/FTS/统计归零、重复清空返回 0、重开库仍为空；`test:mcp`、`test:ai` 均通过
+- 类型检查、构建通过；Vitest 仓库用例新增清空断言：`clearAll()` 返回删除条数、列表/FTS/统计归零、重复清空返回 0、重开库仍为空；`test:mcp`、AI 解析用例均通过
 - 浏览器（mock 数据，`out/renderer/main.html` 静态预览）逐项截图验证：
   - 顶部栏：品牌 + 搜索 + `⋯` + 设置；点 `⋯` 弹出菜单（导出 Markdown / 外观三 chip）
   - 导出弹窗：标题、单选范围、底部按钮正常；`Esc` 可关闭
