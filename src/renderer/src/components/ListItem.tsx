@@ -1,4 +1,4 @@
-import type { MouseEvent } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import type { Item } from '../../../shared/types';
 import { formatRemindTag, formatTime } from '../utils';
 
@@ -7,9 +7,36 @@ export interface ListItemProps {
   selected: boolean;
   cursor: boolean;
   highlight: boolean;
+  query: string;
   onClick: () => void;
   onToggleStatus: (event: MouseEvent) => void;
   onDelete: () => void;
+}
+
+// 把搜索命中的片段包成 <mark>，大小写不敏感、支持多次命中
+function renderText(text: string, query: string): ReactNode {
+  const needle = query.trim();
+  if (!needle) return text;
+
+  const lowerText = text.toLowerCase();
+  const lowerNeedle = needle.toLowerCase();
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  let at = lowerText.indexOf(lowerNeedle);
+
+  while (at !== -1) {
+    if (at > cursor) nodes.push(text.slice(cursor, at));
+    nodes.push(
+      <mark key={at} className="hit">
+        {text.slice(at, at + needle.length)}
+      </mark>,
+    );
+    cursor = at + needle.length;
+    at = lowerText.indexOf(lowerNeedle, cursor);
+  }
+
+  if (cursor < text.length) nodes.push(text.slice(cursor));
+  return nodes.length > 0 ? nodes : text;
 }
 
 export function ListItem({
@@ -17,6 +44,7 @@ export function ListItem({
   selected,
   cursor,
   highlight,
+  query,
   onClick,
   onToggleStatus,
   onDelete,
@@ -42,7 +70,7 @@ export function ListItem({
           </svg>
         </span>
       )}
-      <span className={`text${item.status === 'done' ? ' done' : ''}`}>{item.content}</span>
+      <span className={`text${item.status === 'done' ? ' done' : ''}`}>{renderText(item.content, query)}</span>
       {item.source === 'ai' ? <span className="tag">AI</span> : null}
       {item.remindAt ? (
         <span

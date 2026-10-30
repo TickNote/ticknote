@@ -680,6 +680,7 @@ export function App() {
                         selected={selectedId === item.id}
                         cursor={cursorId === item.id && selectedId !== item.id}
                         highlight={highlightId === item.id}
+                        query={query}
                         onClick={() => {
                           setCursorId(item.id);
                           setSelectedId(item.id);

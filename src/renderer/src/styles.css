@@ -348,6 +348,14 @@ textarea {
   text-decoration: line-through;
 }
 
+/* 搜索命中高亮 */
+.text .hit {
+  padding: 0 1px;
+  color: var(--brand-text);
+  background: var(--brand-soft);
+  border-radius: 2px;
+}
+
 .tag {
   display: inline-flex;
   align-items: center;

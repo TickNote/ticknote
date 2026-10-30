@@ -1,4 +1,4 @@
-# TickNote（待办便签）设计文档（v1.11）
+# TickNote（待办便签）设计文档（v1.12）
 
 > 状态：设计已确认 · Electron / SQLite / MCP stdio
 > 产品定位：记录内容与创建时间，不做任务调度。
@@ -572,6 +572,7 @@ NSIS 按用户安装，默认目录 `%LOCALAPPDATA%\Programs\QuickNote`（安装
 | 2026-10-30 | v1.9 | 已记录条目支持在抽屉内切换「待办 / 便签」：新增 `items:set-kind`（zod 校验）、preload `setItemKind`、mock 同步；切换保留状态与创建时间，列表按当前筛选自动刷新 |
 | 2026-10-30 | v1.10 | 开源化：主进程拆分为 `windows/tray/ipc/settings`，渲染层拆出 `components/` 与 `utils.ts`（main.tsx 1380→803 行）；去 QuickNote 化（appId `com.ticknote.app`、DB 改名 `ticknote.db` 并兼容迁移、localStorage key）；Electron 安全加固（CSP、`sandbox:true`、禁止新窗与跳转、preload 缺失时快速失败）；补充 MIT LICENSE、README 中英、CONTRIBUTING/SECURITY/CODE_OF_CONDUCT/CHANGELOG、docs/ARCHITECTURE|MCP|PRIVACY、CI/Release 工作流、Issue/PR 模板、dependabot、oxlint/Prettier、Vitest 单测、`.editorconfig/.gitattributes/.nvmrc` |
 | 2026-10-30 | v1.11 | 列表行内删除：悬停/选中显示 `×`，删除后 toast 提供 5 秒「撤销」（`items:restore-deleted` + `repo.restore`，按原 id/时间/状态/提醒写回）；主窗移除顶部「待办便签」品牌字；导出改为主窗弹文件夹选择框（托盘仍静默写上次目录） |
+| 2026-10-30 | v1.12 | 搜索命中高亮：列表正文按查询词大小写不敏感地包 `<mark class="hit">`，支持一条内多次命中 |
 
 ---
 
