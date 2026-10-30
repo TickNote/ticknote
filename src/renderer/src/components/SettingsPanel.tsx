@@ -109,7 +109,9 @@ export function SettingsPanel({
             <div className="setting-row">
               <div className="setting-copy">
                 <div className="setting-name">MCP 删除工具</div>
-                <div className="setting-desc">允许 AI 客户端删除记录；默认关闭，修改后需重启 AI 客户端</div>
+                <div className="setting-desc">
+                  允许 AI 客户端删除记录；默认关闭。修改后重启 Claude/Cursor 等 AI 客户端生效，TickNote 无需重启
+                </div>
               </div>
               <input
                 type="checkbox"
