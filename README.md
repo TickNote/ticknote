@@ -92,7 +92,9 @@ See [docs/MCP.md](docs/MCP.md) for client configuration (Claude Desktop, Cursor)
 
 ## Install
 
-Download the latest build from the [Releases](https://github.com/TickNote/ticknote/releases) page. Two options:
+Download the latest build from [GitHub Releases](https://github.com/TickNote/ticknote/releases). Two options:
+
+> **The Gitee mirror does not host binaries.** Gitee caps a single release attachment at 100 MB, while the installer is about 108 MB and the portable zip about 139 MB. Source, docs and tags are mirrored on [Gitee](https://gitee.com/rockw/ticknote); download from the GitHub Releases link above (a proxy may be needed from mainland China).
 
 1. **Installer** — `TickNote-x.y.z-Setup.exe` (NSIS, per-user install, no admin rights required, desktop + Start Menu shortcuts).
    The build is **not code-signed**, so Windows SmartScreen will show "Unknown publisher" / "Windows protected your PC". That is expected: choose _More info_ → _Run anyway_.

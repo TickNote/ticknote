@@ -92,7 +92,9 @@
 
 ## 安装
 
-从 [Releases](https://github.com/TickNote/ticknote/releases) 下载最新构建，两种方式：
+从 [GitHub Releases](https://github.com/TickNote/ticknote/releases) 下载最新构建，两种方式：
+
+> **Gitee 镜像不提供二进制附件。** Gitee 单个发行版附件上限 100 MB，而安装包约 108 MB、便携包约 139 MB，均超出限制。源码、文档与标签在 [Gitee](https://gitee.com/rockw/ticknote) 同步维护，下载请使用上面的 GitHub Releases；国内网络访问 GitHub 可能需要代理。
 
 1. **安装包** —— `TickNote-x.y.z-Setup.exe`（NSIS，按用户安装，无需管理员权限，创建桌面与开始菜单快捷方式）。
    安装包 **未签名**，Windows SmartScreen 会提示「未知发布者 / Windows 已保护你的电脑」，属正常现象：点「更多信息」→「仍要运行」即可。
