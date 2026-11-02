@@ -1,6 +1,6 @@
 > 中文 | [English](ARCHITECTURE.en.md)
 
-# TickNote 架构说明（0.1.1）
+# TickNote 架构说明（1.0.0）
 
 > 面向贡献者的实现级说明。产品/交互的完整规格见仓库根目录的 [DESIGN.md](../DESIGN.md)；MCP 客户端配置见 [MCP.md](MCP.md)。
 
@@ -148,6 +148,8 @@ ticknote/
 
 0.1.1 新增 `backup:export`、`backup:import`（返回 `{path,count} | null`，取消为 null）、`ai:test`（返回 string）；`items:restore-deleted` 服务于列表和抽屉的 5 秒撤销。`items:stats` 返回 `{todayOpenTodos,openTodos,pendingReminders}`；`items:list` 支持 reminders 与复合游标。
 
+1.0.0 未新增 IPC 通道，只改行为：`settings:set` 应用补丁后额外 `refreshTray()`（换绑热键发生在持久化之前，托盘读到的仍是旧组合）；`registerHotkey` 改为可传入候选组合并返回是否成功，供换绑失败回滚使用。
+
 `ai:parse`：启用后只在点击时调用，当前输入 ≤2000 字符，3 秒超时，失败返回 null。`ai:test`：已保存配置、固定句「请回复 OK」、10 秒超时，不发送记录。HTTP/model/key 错误向界面反馈。
 
 ## 4. Preload（`src/preload/index.ts`）
@@ -232,4 +234,4 @@ ticknote/
 - GUI 单条删除只有 5 秒撤销，无长期回收站；MCP 删除/清空全部不可通过此操作撤销。
 - 每日自动数据库备份、AI 批次撤销尚未实现；当前提供手动 JSON 记录备份。
 - 通知受系统设置影响，标记已提醒不等于送达；AI 只润色，不解析日期或自动落库。
-- 安装包未签名；安装、自启、通知、输入法与多屏仍需实机人工验证，见 [验证指南](VALIDATION-0.1.1.md)。
+- 安装包未签名；仅多屏与系统 DPI 仍需实机人工验证（副屏定位、拔屏后浮窗夹回主屏、非 100% 缩放），其余验证项已通过，见 [验证指南](VALIDATION-1.0.0.md)。

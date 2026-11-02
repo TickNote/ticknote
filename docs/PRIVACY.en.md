@@ -2,7 +2,7 @@
 
 # Privacy notice
 
-> Applies to TickNote (待办便签) 0.1.1, the Windows desktop app and its built-in MCP server.
+> Applies to TickNote (待办便签) 1.0.0, the Windows desktop app and its built-in MCP server.
 
 ## In one sentence
 

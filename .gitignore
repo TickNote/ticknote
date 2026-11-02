@@ -2,6 +2,8 @@ node_modules
 out
 dist
 release
+release-*
+.workbuddy
 .tmp
 .screenshots
 scripts/.cache

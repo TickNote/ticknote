@@ -10,7 +10,7 @@ TickNote (Chinese name 「待办便签」) is a tray-resident scratchpad. Press 
 
 ## Screenshots
 
-Captured from **TickNote 0.1.1 running on Windows** on October 30, 2026, using seven example records. The app UI is in Chinese.
+Captured from **TickNote** (0.1.1 build; the UI is unchanged in 1.0.0) running on Windows on October 30, 2026, using seven example records. The app UI is in Chinese.
 
 The main window combines todos, notes, completed items and reminders in creation-time order.
 
@@ -39,7 +39,7 @@ Use the global hotkey to capture a thought, with multiline input and a todo / no
 
 </details>
 
-See the [0.1.1 validation guide (Chinese)](docs/VALIDATION-0.1.1.md) and [screenshot notes](docs/screenshots/README.md) for capture details.
+See the [1.0.0 validation guide (Chinese)](docs/VALIDATION-1.0.0.md) and [screenshot notes](docs/screenshots/README.md) for capture details.
 
 ## Features
 
@@ -56,7 +56,7 @@ See the [0.1.1 validation guide (Chinese)](docs/VALIDATION-0.1.1.md) and [screen
 - Records grouped by creation date (Today / Yesterday / earlier), with collapsible groups.
 - Full-text search over SQLite FTS5 with the `trigram` tokenizer (works for Chinese); queries shorter than 3 characters fall back to `LIKE`.
 - Filter chips: All / Todos / Notes / Done / Reminders, plus a `⋯` menu and settings. The unfinished count includes all open todos.
-- Cards are truncated to 2 lines; click any row (or press `↑`/`↓` then `Enter`) to slide out the details drawer. There you can edit the text (saved on blur), switch note ↔ todo, set or clear a reminder, complete/restore, copy, and delete (undo within 5 seconds).
+- Cards are truncated to 2 lines; click any row (or press `↑`/`↓` then `Enter` while the drawer is closed; once it is open, `↑`/`↓` switch records directly) to slide out the details drawer. There you can edit the text (saved on blur), switch note ↔ todo, set or clear a reminder, complete/restore, copy, and delete (undo within 5 seconds).
 - `Ctrl+N` focuses the composer; `Enter` saves and keeps the focus, `Shift+Enter` inserts a newline.
 - Export Markdown to a folder you choose: all records, the current filter, or today only. Each export gets a separate subfolder, preserving earlier exports. Tray export uses the last or default directory.
 - Reminders are scanned every 30 seconds and shown as Windows toast notifications; clicking one opens the matching record. Reminders missed while the app was closed are merged into a single notification at startup.

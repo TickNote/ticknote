@@ -1,6 +1,6 @@
 > [中文](ARCHITECTURE.md) | English
 
-# TickNote architecture (0.1.1)
+# TickNote architecture (1.0.0)
 
 > An implementation-level description for contributors. The full product/interaction spec lives in [DESIGN.md](../DESIGN.md) at the repository root; MCP client configuration is in [MCP.en.md](MCP.en.md).
 
@@ -148,6 +148,8 @@ The complete channel table is in [DESIGN.md section 8](../DESIGN.md#8-ipc-契约
 
 0.1.1 adds backup:export/import (`{path,count} | null`, null on cancel) and ai:test (string). items:restore-deleted serves both list and drawer undo. Stats return `{todayOpenTodos,openTodos,pendingReminders}`; list supports reminders and a composite cursor.
 
+1.0.0 adds no new channels, only behaviour: settings:set calls refreshTray() after applying a patch (rebinding happens before persistence, so the tray would otherwise read the old combination), and registerHotkey now takes an optional candidate combination and returns whether it succeeded, so a failed rebind can roll back.
+
 ai:parse sends the current input (≤2000 characters) only on user action, with a 3-second timeout and null on failure. ai:test uses saved settings, the fixed message “请回复 OK”, and a 10-second timeout; it sends no records. HTTP/model/key errors are shown in the UI.
 
 ## 4. Preload (`src/preload/index.ts`)
@@ -232,4 +234,4 @@ Checkpoints: `npm run typecheck` must pass; new channel names must not be writte
 - GUI single-item deletion has 5-second undo, no persistent recycle bin; MCP deletion and clear-all do not use this undo.
 - Daily automatic database backup and AI batch undo are not implemented. Manual JSON record backup is available.
 - OS settings affect notifications; a reminded mark is not proof of delivery. AI only polishes; it does not parse dates or automatically create records.
-- Builds are unsigned. Installation, autostart, notification delivery, IME and multiple displays still need manual verification; see the [Chinese validation guide](VALIDATION-0.1.1.md).
+- Builds are unsigned. Only multiple displays and system DPI still need manual verification (secondary-display positioning, the capture window clamping back to the primary display after a monitor is unplugged, and non-100% scaling); every other check has passed. See the [Chinese validation guide](VALIDATION-1.0.0.md).

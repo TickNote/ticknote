@@ -2,7 +2,7 @@
 
 # 隐私说明
 
-> 适用于 TickNote（待办便签）0.1.1，Windows 桌面版及其内置 MCP server。
+> 适用于 TickNote（待办便签）1.0.0，Windows 桌面版及其内置 MCP server。
 
 ## 一句话
 
