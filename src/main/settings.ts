@@ -117,11 +117,12 @@ export function decryptAiKey(): string | null {
   }
 }
 export interface SettingsHooks {
-  onHotkeyChange?: () => void;
+  /** 换绑热键；返回 false 表示新热键注册失败（调用方内部已回滚到原热键） */
+  onHotkeyChange?: (hotkey: string) => boolean;
 }
 export function applySettingsPatch(patch: SettingsPatch, hooks: SettingsHooks = {}): Settings {
   const { aiApiKey, ...changes } = patch;
-  const next = { ...settings, ...changes };
+  let next = { ...settings, ...changes };
   let encrypted = aiApiKeyEncrypted;
   if (aiApiKey !== undefined) {
     if (!aiApiKey?.trim()) encrypted = null;
@@ -132,12 +133,26 @@ export function applySettingsPatch(patch: SettingsPatch, hooks: SettingsHooks = 
     }
     next.aiApiKeySet = Boolean(encrypted);
   }
+
+  // 先试注册再落盘：新热键注册失败（被占用 / 非法）时不持久化坏值，设置里保留原热键
+  let rejectedHotkey: string | null = null;
+  if (patch.hotkey !== undefined && settings.hotkey !== next.hotkey) {
+    const ok = hooks.onHotkeyChange?.(next.hotkey) ?? true;
+    if (ok) {
+      next = { ...next, hotkeyRegistered: true };
+    } else {
+      rejectedHotkey = next.hotkey;
+      // 热键与注册状态一起回滚到旧值：旧热键本来就没注册成功时，警告也应保留
+      next = { ...next, hotkey: settings.hotkey, hotkeyRegistered: settings.hotkeyRegistered };
+    }
+  }
+
   persist(next, encrypted);
-  const hotkeyChanged = settings.hotkey !== next.hotkey;
   settings = next;
   aiApiKeyEncrypted = encrypted;
-  if (hotkeyChanged) hooks.onHotkeyChange?.();
   nativeTheme.themeSource = settings.theme;
+  if (rejectedHotkey)
+    throw new Error(`新热键 ${rejectedHotkey} 注册失败（可能被其他软件占用），已保留原热键`);
   return getSettings();
 }
 export function setHotkeyRegistered(value: boolean): void {

@@ -25,7 +25,7 @@ export interface IpcDependencies {
   refreshTray: () => void;
   focusItem: (id: string) => void;
   exportNow: (scope?: ExportScope, interactive?: boolean) => Promise<ExportResult | null>;
-  registerHotkey: () => void;
+  registerHotkey: (hotkey?: string) => boolean;
   uninstallApp: () => Promise<UninstallResult>;
 }
 
@@ -233,6 +233,8 @@ export function setupIpc(deps: IpcDependencies): void {
       .parse(payload) as SettingsPatch;
     const next = applySettingsPatch(patch, { onHotkeyChange: deps.registerHotkey });
     applyWindowBackground();
+    // 换绑发生在持久化之前，registerHotkey 内部的 refreshTray 读到的还是旧热键，这里再同步一次
+    deps.refreshTray();
     return next;
   });
 

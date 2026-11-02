@@ -34,10 +34,17 @@ export function startOfDay(ts: number): number {
   return date.getTime();
 }
 
+// 跨天偏移走日期运算而不是固定 86_400_000 毫秒，兼容有夏令时的时区
+function addDays(ts: number, days: number): number {
+  const date = new Date(ts);
+  date.setDate(date.getDate() + days);
+  return date.getTime();
+}
+
 export function dayLabel(key: number): string {
   const today = startOfDay(Date.now());
   if (key === today) return '今天';
-  if (key === today - 86_400_000) return '昨天';
+  if (key === startOfDay(addDays(Date.now(), -1))) return '昨天';
   const date = new Date(key);
   return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
@@ -46,7 +53,7 @@ export function formatRemind(ts: number): string {
   const today = startOfDay(Date.now());
   const key = startOfDay(ts);
   if (key === today) return `今天 ${formatTime(ts)}`;
-  if (key === today + 86_400_000) return `明天 ${formatTime(ts)}`;
+  if (key === startOfDay(addDays(Date.now(), 1))) return `明天 ${formatTime(ts)}`;
   return `${dayLabel(key)} ${formatTime(ts)}`;
 }
 
@@ -79,7 +86,7 @@ export function formatRemindTag(ts: number): string {
   const today = startOfDay(Date.now());
   const key = startOfDay(ts);
   if (key === today) return `提醒 ${formatTime(ts)}`;
-  if (key === today + 86_400_000) return `提醒 明天 ${formatTime(ts)}`;
+  if (key === startOfDay(addDays(Date.now(), 1))) return `提醒 明天 ${formatTime(ts)}`;
   return `提醒 ${dayLabel(key)} ${formatTime(ts)}`;
 }
 
@@ -128,6 +135,26 @@ export function acceleratorFromEvent(event: KeyboardEvent): string | null {
   if (!main) return null;
   if (modifiers.length === 0 && !main.startsWith('F')) return null;
   return [...modifiers, main].join('+');
+}
+
+// SPECIAL_KEYS 的反向映射：accelerator 主键 token → 键盘 event.key
+const TOKEN_TO_KEY: Record<string, string> = Object.fromEntries(
+  Object.entries(SPECIAL_KEYS).map(([key, token]) => [token, key]),
+);
+
+// 热键最后一个主键（如 Control+Shift+Space → 空格）。
+// 浮窗刚弹出时热键的末键可能泄漏进输入框，用它判断要丢弃哪个键
+export function hotkeyLastKey(accelerator: string): string | null {
+  const token = accelerator
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .at(-1);
+  if (!token) return null;
+  if (TOKEN_TO_KEY[token]) return TOKEN_TO_KEY[token];
+  if (/^[a-zA-Z0-9]$/.test(token)) return token.toLowerCase();
+  if (/^F(?:[1-9]|1[0-9]|2[0-4])$/.test(token)) return token;
+  return null;
 }
 
 export interface Group {

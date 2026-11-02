@@ -7,7 +7,13 @@ import type { ExportResult, ExportScope, Item, UninstallResult } from '../shared
 import { openRepo, type Repo } from './db/repo';
 import { exportMarkdown } from './export/markdown';
 import { setupIpc } from './ipc';
-import { getSettings, loadSettings, setAutostartConfigured, setHotkeyRegistered } from './settings';
+import {
+  DEFAULT_SETTINGS,
+  getSettings,
+  loadSettings,
+  setAutostartConfigured,
+  setHotkeyRegistered,
+} from './settings';
 import { createTray, getTray, refreshTray } from './tray';
 import {
   createCaptureWindow,
@@ -99,7 +105,12 @@ async function uninstallApp(): Promise<UninstallResult> {
   const target = findUninstaller();
   if (!target) return { available: false, opened: false, reason: 'portable' };
   const error = await shell.openPath(target);
-  return { available: true, opened: error === '', reason: error === '' ? 'opened' : 'error' };
+  const opened = error === '';
+  if (opened) {
+    // 主动退出释放安装目录文件，避免 NSIS 卸载时弹「文件被占用」；稍等让 IPC 结果先送回渲染层
+    setTimeout(() => app.quit(), 800);
+  }
+  return { available: true, opened, reason: opened ? 'opened' : 'error' };
 }
 
 // 主窗导出先弹文件夹选择框；托盘快捷导出直接写到上次目录，减少打断
@@ -126,14 +137,33 @@ async function exportNow(scope: ExportScope = 'all', interactive = true): Promis
   return exportMarkdown(repo.allForExport(scope), target);
 }
 
-function registerHotkey(): void {
+// 当前实际注册成功的热键：换绑失败时回滚用它，保证会话内浮窗始终唤得出
+let activeHotkey: string | null = null;
+
+// accelerator 非法时 globalShortcut.register 会直接抛错（例如手改 settings.json）
+function tryRegisterHotkey(hotkey: string): boolean {
+  try {
+    return globalShortcut.register(hotkey, toggleCapture);
+  } catch (error) {
+    console.warn(`[hotkey] 热键无效: ${hotkey}`, error);
+    return false;
+  }
+}
+
+function registerHotkey(candidate?: string): boolean {
   globalShortcut.unregisterAll();
-  const ok = globalShortcut.register(getSettings().hotkey, toggleCapture);
-  setHotkeyRegistered(ok);
-  if (!ok) {
-    console.warn(`[hotkey] 注册失败，可能被占用: ${getSettings().hotkey}`);
+  const hotkey = candidate?.trim() || getSettings().hotkey || DEFAULT_SETTINGS.hotkey;
+  const ok = tryRegisterHotkey(hotkey);
+  if (ok) {
+    activeHotkey = hotkey;
+  } else {
+    // 选定热键无效或被占用：回滚上一个可用热键（冷启动回退默认热键），避免一个热键都没有
+    const fallback = activeHotkey && activeHotkey !== hotkey ? activeHotkey : DEFAULT_SETTINGS.hotkey;
+    activeHotkey = fallback !== hotkey && tryRegisterHotkey(fallback) ? fallback : null;
+    console.warn(`[hotkey] 注册失败，可能被占用: ${hotkey}`);
   }
   refreshTray();
+  return ok;
 }
 
 function openSettingsPage(): void {
@@ -224,7 +254,10 @@ function bootstrap(): void {
 
   // 安装版首次启动默认开启开机自启（提醒依赖托盘常驻）
   // process.defaultApp 为 true 表示以 `electron .` 开发模式运行，不能把 electron.exe 写进启动项
-  if (app.isPackaged && process.defaultApp !== true && !getSettings().autostartConfigured) {
+  // 便携形态（解压即用 zip / win-unpacked）没有 PORTABLE_EXECUTABLE_DIR 变量，
+  // 用「exe 旁没有卸载程序」识别——NSIS 安装目录必有卸载器；便携目录可能被移动或删除，跳过默认自启
+  const isPortable = Boolean(process.env['PORTABLE_EXECUTABLE_DIR']) || findUninstaller() === null;
+  if (app.isPackaged && !isPortable && process.defaultApp !== true && !getSettings().autostartConfigured) {
     try {
       app.setLoginItemSettings({ openAtLogin: true, path: process.execPath, args: ['--autostart'] });
     } catch (error) {
@@ -275,7 +308,7 @@ function bootstrap(): void {
     uninstallApp,
   });
 
-  registerHotkey();
+  setHotkeyRegistered(registerHotkey());
 
   const autostart = process.argv.includes('--autostart');
   if (!autostart) showMainWindow();
@@ -297,11 +330,25 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   markQuitting();
+  // 兜底：清理阶段卡住时强制退出，避免留下无托盘的僵尸进程占用单实例锁（双击图标无法再启动）
+  setTimeout(() => {
+    console.error('[quit] graceful shutdown timed out, forcing exit');
+    process.exit(0);
+  }, 10_000);
 });
 
 app.on('will-quit', () => {
   if (reminderTimer) clearInterval(reminderTimer);
   if (refreshTimer) clearInterval(refreshTimer);
-  globalShortcut.unregisterAll();
-  repo?.close();
+  // 逐项容错：任何一步抛错都不允许中断退出（曾出现退出后进程残留、托盘消失的情况）
+  try {
+    globalShortcut.unregisterAll();
+  } catch (error) {
+    console.error('[quit] unregister shortcuts failed', error);
+  }
+  try {
+    repo?.close();
+  } catch (error) {
+    console.error('[quit] close database failed', error);
+  }
 });

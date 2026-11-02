@@ -12,11 +12,12 @@ let captureProgrammaticPos: { x: number; y: number } | null = null;
 let onFirstCloseToTray: (() => void) | null = null;
 
 export function getMainWindow(): BrowserWindow | null {
-  return mainWindow;
+  // 窗口可能已被销毁（退出流程中），此时返回 null 而不是抛 "Object has been destroyed"
+  return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
 }
 
 export function getCaptureWindow(): BrowserWindow | null {
-  return captureWindow;
+  return captureWindow && !captureWindow.isDestroyed() ? captureWindow : null;
 }
 
 export function markQuitting(): void {
@@ -52,8 +53,8 @@ export function windowBackground(): string {
 }
 
 export function applyWindowBackground(): void {
-  mainWindow?.setBackgroundColor(windowBackground());
-  captureWindow?.setBackgroundColor(windowBackground());
+  getMainWindow()?.setBackgroundColor(windowBackground());
+  getCaptureWindow()?.setBackgroundColor(windowBackground());
 }
 
 export function createMainWindow(): BrowserWindow {
@@ -109,6 +110,13 @@ export function createCaptureWindow(): BrowserWindow {
 
   loadPage(win, 'capture');
   hardenWindow(win);
+  // 与主窗一致：Alt+F4 / 系统关闭只隐藏，真正销毁只发生在退出流程。
+  // 否则浮窗被销毁后引用残留，热键回调对已销毁窗口调用方法会抛错，浮窗永久失效
+  win.on('close', (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    win.hide();
+  });
   win.on('blur', () => {
     if (getSettings().hideCaptureOnBlur && !win.isDestroyed()) win.hide();
   });
@@ -154,19 +162,21 @@ function positionCaptureWindow(win: BrowserWindow): void {
 }
 
 export function toggleCapture(): void {
-  if (!captureWindow) return;
-  if (captureWindow.isVisible()) {
-    captureWindow.hide();
+  const win = getCaptureWindow();
+  if (!win) return;
+  if (win.isVisible()) {
+    win.hide();
     return;
   }
-  positionCaptureWindow(captureWindow);
-  captureWindow.show();
-  captureWindow.focus();
-  captureWindow.webContents.send(IPC.captureShown);
+  positionCaptureWindow(win);
+  win.show();
+  win.focus();
+  win.webContents.send(IPC.captureShown);
 }
 
 export function showMainWindow(): void {
-  if (!mainWindow) return;
-  mainWindow.show();
-  mainWindow.focus();
+  const win = getMainWindow();
+  if (!win) return;
+  win.show();
+  win.focus();
 }

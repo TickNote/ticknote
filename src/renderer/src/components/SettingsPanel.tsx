@@ -98,6 +98,12 @@ export function SettingsPanel({
             {!settings.hotkeyRegistered ? (
               <div className="setting-warn">当前热键注册失败：可能被其他软件占用，请更换</div>
             ) : null}
+            {recordingHotkey ? (
+              <div className="setting-hint">
+                按 Esc
+                取消录制。若按下的组合已被钉钉、微信等软件注册为全局热键，会被对方直接触发且此处收不到（不会提示冲突），请换一个组合。
+              </div>
+            ) : null}
 
             <div className="setting-row">
               <div className="setting-copy">

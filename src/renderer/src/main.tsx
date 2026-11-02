@@ -363,12 +363,15 @@ export function App() {
     (delta: number) => {
       if (selectedIndex < 0) return;
       const next = visible[selectedIndex + delta];
-      if (next) setSelectedId(next.id);
+      if (next) {
+        setCursorId(next.id);
+        setSelectedId(next.id);
+      }
     },
     [selectedIndex, visible],
   );
 
-  // 键盘：↑↓ 移动选中，Enter 打开抽屉；Esc 按“模态 → 搜索 → 抽屉”顺序退出
+  // 键盘：抽屉关闭时 ↑↓ 移动虚线光标、Enter 打开；抽屉打开后 ↑↓ 直接切换详情；Esc 按“模态 → 搜索 → 抽屉”顺序退出
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
@@ -416,13 +419,19 @@ export function App() {
         if (navigable.length === 0) return;
         event.preventDefault();
         const delta = event.key === 'ArrowDown' ? 1 : -1;
-        const current = cursorId ?? selectedId;
+        // 抽屉打开时以抽屉当前记录为基准（光标可能被 ‹›/点击留在旧行）；未打开时从虚线光标继续
+        const current = selectedId ?? cursorId;
         let index = current ? navigable.findIndex((item) => item.id === current) : -1;
         if (index < 0) index = delta > 0 ? -1 : navigable.length;
         const next = navigable[Math.min(navigable.length - 1, Math.max(0, index + delta))];
         if (next) {
           setCursorId(next.id);
-          document.querySelector(`[data-item-id="${next.id}"]`)?.scrollIntoView({ block: 'nearest' });
+          // 抽屉已打开：↑↓ 直接切换详情，无需再按 Enter
+          if (selectedId) setSelectedId(next.id);
+          // 焦点跟随当前行：否则 Enter 会落在最初点开、仍持有焦点的旧行上，把详情拉回旧记录
+          const row = document.querySelector<HTMLElement>(`[data-item-id="${next.id}"]`);
+          row?.focus({ preventScroll: true });
+          row?.scrollIntoView({ block: 'nearest' });
         }
         return;
       }
@@ -834,6 +843,8 @@ export function App() {
         setRecordingHotkey(false);
         return;
       }
+      // 组合键是逐个按下的：只按 Ctrl / Shift / Alt 时静默等待主键，不提示错误
+      if (['Control', 'Shift', 'Alt', 'Meta'].includes(event.key)) return;
       const accelerator = acceleratorFromEvent(event);
       if (!accelerator) {
         showToast('请按包含 Ctrl / Alt / Shift 的组合键，或 F1-F24');

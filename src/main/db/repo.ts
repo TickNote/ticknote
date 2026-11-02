@@ -89,8 +89,9 @@ export function openRepo(dbPath: string): Repo {
   if (dbPath !== ':memory:') mkdirSync(dirname(dbPath), { recursive: true });
 
   const db = new DatabaseSync(dbPath);
-  db.exec('PRAGMA journal_mode = WAL');
+  // busy_timeout 要放在 journal_mode 之前：设置 WAL 本身也可能撞上并发写锁
   db.exec('PRAGMA busy_timeout = 3000');
+  db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA synchronous = NORMAL');
   migrate(db);
 

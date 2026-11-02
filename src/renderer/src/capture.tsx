@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { CONTENT_LIMIT, type ItemKind } from '../../shared/types';
 import { api } from './api';
 import { errorMessage, useDraft } from './hooks';
-import { KINDS } from './utils';
+import { KINDS, hotkeyLastKey } from './utils';
 import './styles.css';
 
 function Capture() {
@@ -16,6 +16,8 @@ function Capture() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const hideTimer = useRef<number | null>(null);
   const shownAt = useRef(Date.now());
+  // 热键末键（默认 Ctrl+Shift+Space 的空格）：浮窗唤起后 200ms 内丢弃泄漏的该键
+  const swallowKey = useRef<string | null>(' ');
   const submitLock = useRef(false);
   const aiLock = useRef(false);
   const cancelHide = useCallback(() => {
@@ -38,7 +40,10 @@ function Capture() {
       setToast('');
       void api
         .getSettings()
-        .then((value) => setAiEnabled(value.aiEnabled))
+        .then((value) => {
+          setAiEnabled(value.aiEnabled);
+          swallowKey.current = hotkeyLastKey(value.hotkey);
+        })
         .catch(() => setAiEnabled(false));
       requestAnimationFrame(() => textareaRef.current?.focus());
     };
@@ -164,7 +169,12 @@ function Capture() {
               setAiUndo(null);
             }}
             onKeyDown={(event) => {
-              if (event.key === ' ' && Date.now() - shownAt.current < 200) {
+              const leak = swallowKey.current;
+              if (
+                leak !== null &&
+                event.key.toLowerCase() === leak.toLowerCase() &&
+                Date.now() - shownAt.current < 200
+              ) {
                 event.preventDefault();
                 return;
               }

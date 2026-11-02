@@ -33,7 +33,8 @@ function resolveDbPath(): string {
 
 function readDeleteEnabled(settingsPath: string): boolean {
   try {
-    const raw = JSON.parse(readFileSync(settingsPath, 'utf8')) as Partial<Settings>;
+    // 与主进程一致：剥掉记事本等编辑器写入的 BOM，否则 JSON.parse 失败会静默丢失开关状态
+    const raw = JSON.parse(readFileSync(settingsPath, 'utf8').replace(/^\uFEFF/, '')) as Partial<Settings>;
     return raw.mcpDeleteEnabled === true;
   } catch {
     return false;
@@ -45,7 +46,7 @@ const settingsPath = join(dirname(dbPath), 'settings.json');
 const repo = openRepo(dbPath);
 const deleteEnabled = readDeleteEnabled(settingsPath);
 
-const server = new McpServer({ name: 'ticknote', version: '0.1.4' });
+const server = new McpServer({ name: 'ticknote', version: '1.0.0' });
 
 const iso = (ts: number | null): string | null => (ts === null ? null : new Date(ts).toISOString());
 
@@ -88,8 +89,12 @@ server.registerTool(
     annotations: { readOnlyHint: true },
   },
   ({ q, limit }) => {
-    const items = repo.search(q, limit ?? 20);
-    return ok({ count: items.length, items: items.map(serialize) });
+    try {
+      const items = repo.search(q, limit ?? 20);
+      return ok({ count: items.length, items: items.map(serialize) });
+    } catch (error) {
+      return fail((error as Error).message);
+    }
   },
 );
 
@@ -193,9 +198,13 @@ server.registerTool(
     inputSchema: { id: z.string().min(1) },
   },
   ({ id }) => {
-    const item = repo.setStatus(id, true);
-    if (!item) return fail('记录不存在');
-    return ok(serialize(item));
+    try {
+      const item = repo.setStatus(id, true);
+      if (!item) return fail('记录不存在');
+      return ok(serialize(item));
+    } catch (error) {
+      return fail((error as Error).message);
+    }
   },
 );
 
@@ -210,9 +219,13 @@ if (deleteEnabled) {
       annotations: { destructiveHint: true, idempotentHint: true },
     },
     ({ id }) => {
-      const removed = repo.remove(id);
-      if (!removed) return fail('记录不存在');
-      return ok({ deleted: true, id });
+      try {
+        const removed = repo.remove(id);
+        if (!removed) return fail('记录不存在');
+        return ok({ deleted: true, id });
+      } catch (error) {
+        return fail((error as Error).message);
+      }
     },
   );
 }
